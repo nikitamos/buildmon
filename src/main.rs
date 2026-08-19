@@ -1,13 +1,22 @@
 use std::{
-    error::Error, ffi::OsStr, io::{Write, stdout}, ops::Sub, process::{Command, Stdio}, thread::{self, sleep}, time::{Duration, SystemTime},
+    error::Error,
+    ffi::OsStr,
+    io::{Write, stdout},
+    ops::Sub,
+    process::{Command, Stdio},
+    thread::{self, sleep},
+    time::{Duration, SystemTime},
 };
 
-use buildmon::CompilationProcess;
+use buildmon::{
+    CompilationProcess,
+    classifier::{ClassifierImpl, ProcessClassifier},
+};
 use bumpalo::Bump;
 use crossterm::{
     ExecutableCommand, QueueableCommand,
     cursor::MoveTo,
-    style::{self, Print, PrintStyledContent, Stylize},
+    style::{self, Print, PrintStyledContent, StyledContent, Stylize},
     terminal::{
         Clear,
         ClearType::{self},
@@ -35,15 +44,26 @@ impl AllocInfo {
     }
 }
 
-#[allow(unused_must_use)]
+fn print_proc_info(stdout: &mut std::io::Stdout, proc: &CompilationProcess) {
+    if let Ok(class) = ClassifierImpl.classify(proc) {
+        let _ = stdout.queue(PrintStyledContent(class.tool.green().bold()));
+    }
+    print!(" ");
+    let _ = stdout.queue(
+        PrintStyledContent(
+            proc.executable_basename()
+                .as_deref()
+                .map(|ex| ex.underline_cyan())
+                .unwrap_or_else(|| proc.cmdline().underline_black())
+        ),
+    );
+    println!(" {}", proc.pid());
+}
+
 fn print_tree(depth: u32, root: &CompilationProcess, alloc: &mut AllocInfo) {
     let mut stdout = stdout();
     print_depth(&mut stdout, depth);
-    println!(
-        "-{} ({})",
-        root.executable().file_name().unwrap_or(OsStr::new("")).display(),
-        root.pid()
-    );
+    print_proc_info(&mut stdout, root);
     let Ok(children) = root.children_pids(&alloc.arena, &mut alloc.str_buf) else {
         return;
     };
@@ -53,7 +73,7 @@ fn print_tree(depth: u32, root: &CompilationProcess, alloc: &mut AllocInfo) {
             print_tree(depth + 1, &p, alloc);
         } else {
             print_depth(&mut stdout, depth + 1);
-            stdout.queue(style::PrintStyledContent("<died of cringe>".dark_red()));
+            let _ = stdout.queue(style::PrintStyledContent("<died quietly>".dark_red()));
         }
     }
 }
@@ -68,15 +88,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap();
 
     let pid = c.id();
-    // let status = thread::spawn(move || c.wait());
-    println!("Process {pid}");
-    // let proc = s.process(pid).expect("No process with such PID");
     let cproc = CompilationProcess::from_pid(pid)?;
 
     let mut alloc = AllocInfo::new();
     let mut stdout = stdout();
     stdout.execute(Clear(ClearType::All))?;
     while cproc.is_alive(&mut alloc.str_buf) {
+        alloc.arena.reset();
         stdout
             .queue(Clear(ClearType::FromCursorUp))?
             .queue(MoveTo(0, 0))?;
@@ -84,6 +102,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         stdout.flush()?;
         sleep(Duration::from_millis(20));
     }
-    println!("Exited with status {:?}", c.wait().unwrap().code());
+    let status = c.wait().unwrap();
+    println!("\nExited with status {:?}", status.code());
     Ok(())
 }

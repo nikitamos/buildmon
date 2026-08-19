@@ -1,36 +1,13 @@
 #![allow(dead_code)]
 
 use std::{
-    collections::HashMap, ffi::OsStr, fmt::format, fs::File, io::Read, num::IntErrorKind,
+    borrow::Cow, collections::HashMap, ffi::OsStr, fs::File, io::Read, num::IntErrorKind,
     path::Path,
 };
 
 use bumpalo::Bump;
 
 mod bump_ext;
-
-pub enum ProcessKind {
-    Compiler,
-    Linker,
-    Tool,
-    Build(BuildSystem),
-}
-
-pub enum Language {
-    C,
-    CXX,
-    Rust,
-    Zig,
-}
-
-pub enum BuildSystem {
-    CMake,
-    Ninja,
-    Make,
-    Cargo,
-    ZigBuild,
-    Heretical(String),
-}
 
 #[derive(Debug)]
 pub enum ProcessError {
@@ -51,21 +28,9 @@ impl From<std::io::Error> for ProcessError {
     }
 }
 
-pub struct ProcessClassification {
-    kind: ProcessKind,
-}
-
-impl ProcessClassification {
-    pub const fn unknown() -> Self {
-        todo!()
-    }
-}
-
 pub type Result<T, E = ProcessError> = std::result::Result<T, E>;
 
-pub trait ProcessClassifier {
-    fn classify(&self, proc: &CompilationProcess) -> Result<ProcessClassification, ProcessError>;
-}
+pub mod classifier;
 
 #[derive(Debug)]
 pub struct CompilationProcess {
@@ -79,13 +44,21 @@ impl CompilationProcess {
     const BUF_CAPACITY: usize = 512;
 
     pub fn from_pid(pid: u32) -> Result<Self> {
+        let mut cmdline = String::new();
         let mut cmdline_file =
             File::open(&format!("/proc/{pid}/cmdline")).map_err(|e| match e.kind() {
                 std::io::ErrorKind::NotFound => ProcessError::Dead,
                 _ => ProcessError::Io(e),
             })?;
-        let mut cmdline = String::new();
-        cmdline_file.read_to_string(&mut cmdline)?;
+        // FIXME: If `CompilationProcess` for child process is created right after
+        // the child spawned, for some reason it fails to read the cmdline at the
+        // first attempt, so we try several times as a workaround
+        for _ in 0..200 {
+            cmdline_file.read_to_string(&mut cmdline)?;
+            if cmdline.len() != 0 {
+                break;
+            }
+        }
         Ok(Self { cmdline, pid })
     }
 
@@ -136,14 +109,21 @@ impl CompilationProcess {
     }
     pub fn executable(&self) -> &Path {
         Path::new(
-            self
-                .cmdline
+            self.cmdline
                 .split_once('\0')
                 .map(|s| s.0)
                 .unwrap_or(&self.cmdline),
         )
     }
+
+    pub fn executable_basename(&self) -> Option<Cow<'_, str>> {
+        self.executable().file_name().map(OsStr::to_string_lossy)
+    }
+
     pub fn pid(&self) -> u32 {
         self.pid
+    }
+    pub fn cmdline(&self) -> &str {
+        &self.cmdline
     }
 }
