@@ -1,6 +1,9 @@
 #![allow(dead_code)]
 
-use std::{fs::File, io::Read, num::IntErrorKind, path::Path};
+use std::{
+    collections::HashMap, ffi::OsStr, fmt::format, fs::File, io::Read, num::IntErrorKind,
+    path::Path,
+};
 
 use bumpalo::Bump;
 
@@ -85,7 +88,23 @@ impl CompilationProcess {
         cmdline_file.read_to_string(&mut cmdline)?;
         Ok(Self { cmdline, pid })
     }
-    pub fn is_dead() {}
+
+    pub fn is_alive(&self, buf: &mut String) -> bool {
+        let Ok(mut f) = File::open(&format!("/proc/{}/status", self.pid)) else {
+            eprintln!("no file?");
+            return false;
+        };
+        if let Err(_) = f.read_to_string(buf) {
+            return false;
+        }
+        let h: HashMap<&str, &str> = buf.lines().filter_map(|l| l.split_once(":\t")).collect();
+        let state = h["State"].chars().next();
+        state != Some('Z')
+    }
+
+    pub fn is_finished(&self, buf: &mut String) -> bool {
+        !self.is_alive(buf)
+    }
     // Is it actually better to have copies or a lot of heap allocations?
     // Large of the data stored in arenas literally gets copied.
     pub fn children_pids<'s, 'b>(
@@ -93,7 +112,6 @@ impl CompilationProcess {
         arena: &'b Bump,
         stbuf: &'b mut String,
     ) -> std::io::Result<impl Iterator<Item = u32> + use<'b>> {
-        let pid = self.pid;
         let pid_str = self.pid.to_string();
         let task_dir = Path::new("/proc").join(pid_str).join("task");
         Ok(std::fs::read_dir(task_dir)?
@@ -116,11 +134,14 @@ impl CompilationProcess {
             .filter_map(|r| r.inspect_err(|e| eprint!("{}", e)).ok())
             .flatten())
     }
-    pub fn executable(&self) -> &str {
-        self.cmdline
-            .split_once('\0')
-            .map(|s| s.0)
-            .unwrap_or(&self.cmdline)
+    pub fn executable(&self) -> &Path {
+        Path::new(
+            self
+                .cmdline
+                .split_once('\0')
+                .map(|s| s.0)
+                .unwrap_or(&self.cmdline),
+        )
     }
     pub fn pid(&self) -> u32 {
         self.pid
