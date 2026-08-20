@@ -1,11 +1,9 @@
 use std::{
     error::Error,
-    ffi::OsStr,
     io::{Write, stdout},
-    ops::Sub,
-    process::{Command, Stdio},
-    thread::{self, sleep},
-    time::{Duration, SystemTime},
+    process::{Child, Command, Stdio},
+    thread::sleep,
+    time::Duration,
 };
 
 use buildmon::{
@@ -16,7 +14,7 @@ use bumpalo::Bump;
 use crossterm::{
     ExecutableCommand, QueueableCommand,
     cursor::MoveTo,
-    style::{self, Print, PrintStyledContent, StyledContent, Stylize},
+    style::{self, PrintStyledContent, Stylize},
     terminal::{
         Clear,
         ClearType::{self},
@@ -24,7 +22,7 @@ use crossterm::{
 };
 
 #[inline(always)]
-fn print_depth(stdout: &mut std::io::Stdout, d: u32) {
+fn print_depth(_stdout: &mut std::io::Stdout, d: u32) {
     for _ in 0..d {
         print!(" ");
     }
@@ -44,6 +42,12 @@ impl AllocInfo {
     }
 }
 
+impl Default for AllocInfo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 fn print_proc_info(stdout: &mut std::io::Stdout, proc: &CompilationProcess) -> std::io::Result<()> {
     let class = ClassifierImpl.classify(proc);
     stdout.queue(PrintStyledContent(class.tool.green().bold()))?;
@@ -57,7 +61,9 @@ fn print_proc_info(stdout: &mut std::io::Stdout, proc: &CompilationProcess) -> s
                 .unwrap_or_else(|| proc.cmdline().underline_black()),
         ))?
         .queue(PrintStyledContent(" => ".blue().bold()))?
-        .queue(PrintStyledContent(class.artifact.unwrap_or("<no_artifact>").yellow()))?;
+        .queue(PrintStyledContent(
+            class.artifact.unwrap_or("<no_artifact>").yellow(),
+        ))?;
     println!(" {}", proc.pid());
     Ok(())
 }
@@ -65,7 +71,7 @@ fn print_proc_info(stdout: &mut std::io::Stdout, proc: &CompilationProcess) -> s
 fn print_tree(depth: u32, root: &CompilationProcess, alloc: &mut AllocInfo) {
     let mut stdout = stdout();
     print_depth(&mut stdout, depth);
-    print_proc_info(&mut stdout, root);
+    let _ = print_proc_info(&mut stdout, root);
     let Ok(children) = root.children_pids(&alloc.arena, &mut alloc.str_buf) else {
         return;
     };
@@ -80,14 +86,38 @@ fn print_tree(depth: u32, root: &CompilationProcess, alloc: &mut AllocInfo) {
     }
 }
 
+struct WaitChild(Child);
+
+impl std::ops::DerefMut for WaitChild {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl std::ops::Deref for WaitChild {
+    type Target = Child;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for WaitChild {
+    fn drop(&mut self) {
+        _ = self.0.wait();
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let mut args = std::env::args();
-    let mut c = Command::new(args.nth(1).expect("Program to start expected"))
-        .args(args)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut c = WaitChild(
+        Command::new(args.nth(1).expect("Program to start expected"))
+            .args(args)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
 
     let pid = c.id();
     let cproc = CompilationProcess::from_pid(pid)?;

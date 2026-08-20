@@ -1,4 +1,4 @@
-use std::fmt::{Display, write};
+use std::fmt::Display;
 
 use crossterm::style::{ContentStyle, StyledContent, Stylize};
 
@@ -105,8 +105,7 @@ impl ProcessClassifier for ClassifierImpl {
                 if arg == "-o" {
                     break iter
                         .next()
-                        .map(|p| Path::new(p).file_name().map(|s| s.to_str().unwrap_or(p)))
-                        .flatten();
+                        .and_then(|p| Path::new(p).file_name().map(|s| s.to_str().unwrap_or(p)));
                 }
             } else {
                 break None;

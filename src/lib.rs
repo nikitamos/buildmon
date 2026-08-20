@@ -46,7 +46,7 @@ impl CompilationProcess {
     pub fn from_pid(pid: u32) -> Result<Self> {
         let mut cmdline = String::new();
         let mut cmdline_file =
-            File::open(&format!("/proc/{pid}/cmdline")).map_err(|e| match e.kind() {
+            File::open(format!("/proc/{pid}/cmdline")).map_err(|e| match e.kind() {
                 std::io::ErrorKind::NotFound => ProcessError::Dead,
                 _ => ProcessError::Io(e),
             })?;
@@ -55,7 +55,7 @@ impl CompilationProcess {
         // first attempt, so we try several times as a workaround
         for _ in 0..200 {
             cmdline_file.read_to_string(&mut cmdline)?;
-            if cmdline.len() != 0 {
+            if !cmdline.is_empty() {
                 break;
             }
         }
@@ -63,11 +63,11 @@ impl CompilationProcess {
     }
 
     pub fn is_alive(&self, buf: &mut String) -> bool {
-        let Ok(mut f) = File::open(&format!("/proc/{}/status", self.pid)) else {
+        let Ok(mut f) = File::open(format!("/proc/{}/status", self.pid)) else {
             eprintln!("no file?");
             return false;
         };
-        if let Err(_) = f.read_to_string(buf) {
+        if f.read_to_string(buf).is_err() {
             return false;
         }
         let h: HashMap<&str, &str> = buf.lines().filter_map(|l| l.split_once(":\t")).collect();
@@ -80,8 +80,8 @@ impl CompilationProcess {
     }
     // Is it actually better to have copies or a lot of heap allocations?
     // Large of the data stored in arenas literally gets copied.
-    pub fn children_pids<'s, 'b>(
-        &'s self,
+    pub fn children_pids<'b>(
+        &self,
         arena: &'b Bump,
         stbuf: &'b mut String,
     ) -> std::io::Result<impl Iterator<Item = u32> + use<'b>> {
