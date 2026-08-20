@@ -33,17 +33,16 @@ pub type Result<T, E = ProcessError> = std::result::Result<T, E>;
 pub mod classifier;
 
 #[derive(Debug)]
-pub struct CompilationProcess {
-    cmdline: String,
+pub struct CompilationProcess<'a> {
+    cmdline: &'a str,
     pid: u32,
 }
 
 impl std::error::Error for ProcessError {}
 
-impl CompilationProcess {
+impl<'a> CompilationProcess<'a> {
     const BUF_CAPACITY: usize = 512;
-
-    pub fn from_pid(pid: u32) -> Result<Self> {
+    pub fn from_pid_in(pid: u32, arena: &'a Bump) -> Result<&'a Self> {
         let mut cmdline = String::new();
         let mut cmdline_file =
             File::open(format!("/proc/{pid}/cmdline")).map_err(|e| match e.kind() {
@@ -59,7 +58,8 @@ impl CompilationProcess {
                 break;
             }
         }
-        Ok(Self { cmdline, pid })
+        let cmdline = arena.alloc_str(&cmdline);
+        Ok(arena.alloc(Self { cmdline, pid }))
     }
 
     pub fn is_alive(&self, buf: &mut String) -> bool {

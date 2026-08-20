@@ -41,23 +41,29 @@ pub enum Tool<'a> {
     Heresy(Cow<'a, str>),
 }
 
+impl<'a> Tool<'a> {
+    pub fn short_repr(&self) -> &'a str {
+        match self {
+            Tool::CC => "CC   ",
+            Tool::CXX => "CXX  ",
+            Tool::Rust => "RUSTC",
+            Tool::Zig => "ZIG  ",
+            Tool::Linker => "LINK ",
+            Tool::CMake => "CMAKE",
+            Tool::Ninja => "NINJA",
+            Tool::Make => "MAKE ",
+            Tool::Cargo => "CARGO",
+            Tool::ZigBuild => "ZIGBD",
+            Tool::Shell => "SHELL",
+            Tool::Asm => "ASM  ",
+            Heresy(_) => "OTHER",
+        }
+    }
+}
+
 impl<'a> Display for Tool<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Tool::CC => write!(f, "CC   "),
-            Tool::CXX => write!(f, "CXX  "),
-            Tool::Rust => write!(f, "RUSTC"),
-            Tool::Zig => write!(f, "ZIG  "),
-            Tool::Linker => write!(f, "LINK "),
-            Tool::CMake => write!(f, "CMAKE"),
-            Tool::Ninja => write!(f, "NINJA"),
-            Tool::Make => write!(f, "MAKE "),
-            Tool::Cargo => write!(f, "CARGO"),
-            Tool::ZigBuild => write!(f, "ZIGBD"),
-            Tool::Shell => write!(f, "SHELL"),
-            Tool::Asm => write!(f, "ASM  "),
-            Heresy(_) => write!(f, "OTHER"),
-        }
+        write!(f, "{}", self.short_repr())
     }
 }
 
@@ -92,7 +98,7 @@ impl ProcessClassifier for ClassifierImpl {
             "make" => Tool::Make,
             "cargo" => Tool::Cargo,
             "sh" | "bash" | "csh" | "zsh" | "fish" => Tool::Shell,
-            "ld" | "lld" | "ld.lld" | "mold" | "gold" | "collect2"| "rust-lld" => Tool::Linker,
+            "ld" | "lld" | "ld.lld" | "mold" | "gold" | "collect2" | "rust-lld" => Tool::Linker,
             "as" | "llvm-as" => Tool::Asm,
             _ => Heresy(basename),
         };
