@@ -22,6 +22,8 @@ pub enum Tool<'a> {
     Rust,
     /// Zig compiler itself (NOT linker and NOT `zig build`)
     Zig,
+    /// Assembler
+    Asm,
 
     /// Any linker (ld, lld, mold, zig link, etc.)
     Linker,
@@ -42,17 +44,18 @@ pub enum Tool<'a> {
 impl<'a> Display for Tool<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Tool::CC => write!(f, "   CC"),
-            Tool::CXX => write!(f, "  CXX"),
+            Tool::CC => write!(f, "CC   "),
+            Tool::CXX => write!(f, "CXX  "),
             Tool::Rust => write!(f, "RUSTC"),
-            Tool::Zig => write!(f, "  ZIG"),
-            Tool::Linker => write!(f, " LINK"),
+            Tool::Zig => write!(f, "ZIG  "),
+            Tool::Linker => write!(f, "LINK "),
             Tool::CMake => write!(f, "CMAKE"),
             Tool::Ninja => write!(f, "NINJA"),
-            Tool::Make => write!(f, " MAKE"),
+            Tool::Make => write!(f, "MAKE "),
             Tool::Cargo => write!(f, "CARGO"),
             Tool::ZigBuild => write!(f, "ZIGBD"),
             Tool::Shell => write!(f, "SHELL"),
+            Tool::Asm => write!(f, "ASM  "),
             Heresy(_) => write!(f, "OTHER"),
         }
     }
@@ -72,19 +75,12 @@ pub struct ProcessClassification<'proc> {
 }
 
 pub trait ProcessClassifier {
-    fn classify<'proc>(
-        &self,
-        proc: &'proc CompilationProcess,
-    ) -> Result<ProcessClassification<'proc>, ProcessError>;
+    fn classify<'proc>(&self, proc: &'proc CompilationProcess) -> ProcessClassification<'proc>;
 }
-
 pub struct ClassifierImpl;
 
 impl ProcessClassifier for ClassifierImpl {
-    fn classify<'proc>(
-        &self,
-        proc: &'proc CompilationProcess,
-    ) -> Result<ProcessClassification<'proc>, ProcessError> {
+    fn classify<'proc>(&self, proc: &'proc CompilationProcess) -> ProcessClassification<'proc> {
         let basename = proc.executable_basename().unwrap_or_default();
         let tool = match basename.as_ref() {
             "clang++" | "g++" | "c++" | "cc1plus" => Tool::CXX, // TODO:
@@ -96,12 +92,27 @@ impl ProcessClassifier for ClassifierImpl {
             "make" => Tool::Make,
             "cargo" => Tool::Cargo,
             "sh" | "bash" | "csh" | "zsh" | "fish" => Tool::Shell,
-            "ld" | "lld" | "ld.lld" | "mold" | "gold" => Tool::Linker,
+            "ld" | "lld" | "ld.lld" | "mold" | "gold" | "collect2"| "rust-lld" => Tool::Linker,
+            "as" | "llvm-as" => Tool::Asm,
             _ => Heresy(basename),
         };
-        Ok(ProcessClassification {
-            tool,
-            artifact: None,
-        })
+
+        // For now we will assume, that path to the output artifact
+        // is given after -o, as it is a rather common convention
+        let mut iter = proc.args();
+        let artifact = loop {
+            if let Some(arg) = iter.next() {
+                if arg == "-o" {
+                    break iter
+                        .next()
+                        .map(|p| Path::new(p).file_name().map(|s| s.to_str().unwrap_or(p)))
+                        .flatten();
+                }
+            } else {
+                break None;
+            }
+        };
+
+        ProcessClassification { tool, artifact }
     }
 }

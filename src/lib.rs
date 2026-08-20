@@ -116,6 +116,10 @@ impl CompilationProcess {
         )
     }
 
+    pub fn args(&self) -> impl Iterator<Item = &str> {
+        self.cmdline().split('\0')
+    }
+
     pub fn executable_basename(&self) -> Option<Cow<'_, str>> {
         self.executable().file_name().map(OsStr::to_string_lossy)
     }

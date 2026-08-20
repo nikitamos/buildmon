@@ -44,20 +44,22 @@ impl AllocInfo {
     }
 }
 
-fn print_proc_info(stdout: &mut std::io::Stdout, proc: &CompilationProcess) {
-    if let Ok(class) = ClassifierImpl.classify(proc) {
-        let _ = stdout.queue(PrintStyledContent(class.tool.green().bold()));
-    }
+fn print_proc_info(stdout: &mut std::io::Stdout, proc: &CompilationProcess) -> std::io::Result<()> {
+    let class = ClassifierImpl.classify(proc);
+    stdout.queue(PrintStyledContent(class.tool.green().bold()))?;
+
     print!(" ");
-    let _ = stdout.queue(
-        PrintStyledContent(
+    stdout
+        .queue(PrintStyledContent(
             proc.executable_basename()
                 .as_deref()
                 .map(|ex| ex.underline_cyan())
-                .unwrap_or_else(|| proc.cmdline().underline_black())
-        ),
-    );
+                .unwrap_or_else(|| proc.cmdline().underline_black()),
+        ))?
+        .queue(PrintStyledContent(" => ".blue().bold()))?
+        .queue(PrintStyledContent(class.artifact.unwrap_or("<no_artifact>").yellow()))?;
     println!(" {}", proc.pid());
+    Ok(())
 }
 
 fn print_tree(depth: u32, root: &CompilationProcess, alloc: &mut AllocInfo) {
