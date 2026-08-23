@@ -1,5 +1,13 @@
 //! Widget for displaying process tree.
-use ratatui::{prelude::Buffer, text::Span, widgets::Widget};
+use ratatui::{
+    prelude::Buffer,
+    style::Style,
+    symbols::{border, line},
+    text::Span,
+    widgets::Widget,
+};
+
+use crate::minmax;
 
 pub trait TreeNode {
     fn row<'s>(&'s self) -> LazyRow<'s, impl Iterator<Item = Span<'s>>>;
@@ -42,9 +50,30 @@ pub struct Tree<S: TreeNode> {
 }
 struct TreeInner {
     offsets: Vec<u16>,
+    branch: line::Set<'static>,
 }
 
 impl TreeInner {
+    // #[inline(always)]
+    // fn put_join(depth)
+    #[inline(always)]
+    fn put_default_join(&self, depth: u16, height: u16, buf: &mut Buffer) {
+        if depth != 0 {
+            buf.set_string(depth - 1, height, self.branch.bottom_left, Style::default());
+        }
+    }
+    #[inline(always)]
+    fn connect_siblings(&self, depth: u16, sibling_height: u16, height: u16, buf: &mut Buffer) {
+        if depth == 0 {
+            // Technically this is unreachable since the tree always has one root
+            return;
+        }
+        let (low, high) = minmax(sibling_height, height);
+        buf.set_string(depth - 1, low, self.branch.vertical_right, Style::default());
+        for y in (low + 1)..(high) {
+            buf.set_string(depth - 1, y, self.branch.vertical, Style::default());
+        }
+    }
     /// Renders node and all of its children.
     ///
     /// Return the height where the next node of the depth may be rendered
@@ -59,10 +88,13 @@ impl TreeInner {
         for (cell, offset) in row.iter().zip(&self.offsets) {
             buf.set_string(offset + depth, height, &cell.content, cell.style);
         }
+        self.put_default_join(depth, height, buf);
         height += 1;
+        let mut prev_height = height;
 
         for c in node.children() {
-            // I guess, here we will draw branches
+            self.connect_siblings(depth+1, prev_height, height, buf);
+            prev_height = height;
             height = self.render_node(c, buf, depth + 1, height);
         }
 
@@ -74,8 +106,15 @@ impl<S: TreeNode> Tree<S> {
     pub fn new(root: S, offsets: Vec<u16>) -> Self {
         Self {
             root,
-            inner: TreeInner { offsets },
+            inner: TreeInner {
+                offsets,
+                branch: line::ROUNDED,
+            },
         }
+    }
+    pub fn branch(mut self, set: line::Set<'static>) -> Self {
+        self.inner.branch = set;
+        self
     }
 }
 

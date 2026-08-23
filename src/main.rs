@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::io;
 use std::ops::DerefMut;
+use std::process::exit;
 use std::time::Duration;
 use std::{
     error::Error,
@@ -68,7 +69,7 @@ impl<'a> TreeNode for ProcessNode<'a> {
         let class = ClassifierImpl.classify(&self.proc);
         LazyRow::new([
             Span::from(class.tool.short_repr().green().bold()),
-            Span::from(self.proc.executable().to_str().unwrap_or_default()),
+            Span::from(self.proc.executable_basename().unwrap_or_default()),
             Span::from(class.artifact.unwrap_or("UNKNOWN")),
             Span::from("TODO"),
             Span::from("TODO"),
@@ -170,7 +171,7 @@ impl Widget for &App {
     {
         let Ok(root) = ProcessNode::from_pid_in(self.child.id(), &self.alloc) else {
             // Process probably died
-            return;
+            panic!("died?");
         };
         let tree = Tree::new(root, vec![0, 11, 21, 36, 40, 44]);
         tree.render(area, buf);

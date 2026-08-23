@@ -10,6 +10,14 @@ use bumpalo::Bump;
 
 mod bump_ext;
 
+#[inline(always)]
+pub(crate) fn minmax<T: Ord>(a: T, b: T) -> (T, T) {
+    match a.cmp(&b) {
+        std::cmp::Ordering::Greater => (b, a),
+        _ => (a, b),
+    }
+}
+
 #[derive(Debug)]
 pub enum ProcessError {
     Dead,
@@ -108,6 +116,7 @@ impl<'a> CompilationProcess<'a> {
             .filter_map(|r| r.inspect_err(|e| eprint!("{}", e)).ok())
             .flatten())
     }
+    /// Full path to the executable
     pub fn executable(&self) -> &Path {
         Path::new(
             self.cmdline
@@ -121,6 +130,7 @@ impl<'a> CompilationProcess<'a> {
         self.cmdline().split('\0')
     }
 
+    /// Filename of the executable
     pub fn executable_basename(&self) -> Option<Cow<'_, str>> {
         self.executable().file_name().map(OsStr::to_string_lossy)
     }
