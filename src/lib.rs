@@ -1,3 +1,4 @@
+#![feature(trait_alias)]
 #![allow(dead_code)]
 
 use std::{
@@ -31,6 +32,7 @@ impl From<std::io::Error> for ProcessError {
 pub type Result<T, E = ProcessError> = std::result::Result<T, E>;
 
 pub mod classifier;
+pub mod tree;
 
 #[derive(Debug)]
 pub struct CompilationProcess<'a> {
@@ -64,7 +66,6 @@ impl<'a> CompilationProcess<'a> {
 
     pub fn is_alive(&self, buf: &mut String) -> bool {
         let Ok(mut f) = File::open(format!("/proc/{}/status", self.pid)) else {
-            eprintln!("no file?");
             return false;
         };
         if f.read_to_string(buf).is_err() {

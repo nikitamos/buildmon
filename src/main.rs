@@ -9,11 +9,13 @@ use std::{
 };
 
 use buildmon::ProcessError;
+use buildmon::tree::{LazyRow, Tree, TreeNode};
 use buildmon::{
     CompilationProcess,
     classifier::{ClassifierImpl, ProcessClassifier},
 };
 use bumpalo::Bump;
+use bumpalo::collections::CollectIn;
 use crossterm::event::{self, Event, KeyCode};
 use ratatui::widgets::{self, Cell, Row};
 use ratatui::{
@@ -49,34 +51,47 @@ impl Default for AllocInfo {
     }
 }
 
-pub fn get_proc_row<'a>(proc: &'a CompilationProcess, _alloc: &AllocInfo) -> Row<'a> {
-    let class = ClassifierImpl.classify(proc);
-    Row::new([
-        Cell::new(class.tool.short_repr().green().bold()),
-        Cell::new(proc.executable().to_str().unwrap_or_default()),
-        Cell::new(class.artifact.unwrap_or("UNKNOWN")),
-        Cell::new("TODO"),
-        Cell::new("TODO"),
-    ])
+pub struct ProcessNode<'a> {
+    proc: &'a CompilationProcess<'a>,
+    alloc: &'a AllocInfo,
 }
 
-fn retrieve_tree<'a>(
-    depth: u32,
-    root: &'a CompilationProcess,
-    alloc: &'a AllocInfo,
-    out: &mut Vec<Row<'a>>,
-) {
-    out.push(get_proc_row(root, alloc));
-    eprintln!("adding proc!");
-    let mut buf = String::new();
-    let Ok(children) = root.children_pids(&alloc.arena, &mut buf) else {
-        return;
-    };
+impl<'a> ProcessNode<'a> {
+    pub fn from_pid_in(pid: u32, alloc: &'a AllocInfo) -> buildmon::Result<Self> {
+        let proc = CompilationProcess::from_pid_in(pid, &alloc.procs)?;
+        Ok(Self { proc, alloc })
+    }
+}
 
-    for c in children.collect::<Vec<_>>() {
-        if let Ok(p) = CompilationProcess::from_pid_in(c, &alloc.procs) {
-            retrieve_tree(depth + 1, &p, alloc, out);
-        }
+impl<'a> TreeNode for ProcessNode<'a> {
+    fn row<'s>(&'s self) -> LazyRow<'s, impl Iterator<Item = Span<'s>>> {
+        let class = ClassifierImpl.classify(&self.proc);
+        LazyRow::new([
+            Span::from(class.tool.short_repr().green().bold()),
+            Span::from(self.proc.executable().to_str().unwrap_or_default()),
+            Span::from(class.artifact.unwrap_or("UNKNOWN")),
+            Span::from("TODO"),
+            Span::from("TODO"),
+        ])
+    }
+
+    fn children(self) -> impl Iterator<Item = Self> {
+        use bumpalo::collections::Vec;
+        let mut stbuf = self.alloc.str_buf();
+        let children = self
+            .proc
+            .children_pids(&self.alloc.arena, &mut stbuf)
+            .map(|pids| Vec::from_iter_in(pids, &self.alloc.arena))
+            .unwrap_or_else(|_| Vec::new_in(&self.alloc.arena));
+
+        children.into_iter().filter_map(move |c| {
+            CompilationProcess::from_pid_in(c, &self.alloc.procs)
+                .ok()
+                .map(|proc| Self {
+                    alloc: &self.alloc,
+                    proc,
+                })
+        })
     }
 }
 
@@ -104,28 +119,28 @@ impl Drop for WaitChild {
 }
 
 #[derive(Debug)]
-struct App<'a> {
+struct App {
     exit: bool,
     child: WaitChild,
-    alloc: &'a AllocInfo,
-    root: &'a CompilationProcess<'a>,
+    alloc: AllocInfo,
 }
 
-impl<'a> App<'a> {
-    pub fn new(child: WaitChild, alloc: &'a AllocInfo) -> Result<Self, ProcessError> {
-        let root = CompilationProcess::from_pid_in(child.id(), &alloc.procs)?;
+impl App {
+    pub fn new(child: WaitChild, alloc: AllocInfo) -> Result<Self, ProcessError> {
         Ok(Self {
             exit: false,
             child,
             alloc,
-            root,
         })
     }
     pub fn run(&mut self, term: &mut DefaultTerminal) -> io::Result<()> {
         while !self.exit {
+            self.alloc.procs.reset();
+            self.alloc.arena.reset();
             term.draw(|f| self.draw(f))?;
             self.handle_events()?;
         }
+        self.child.kill()?;
         Ok(())
     }
 
@@ -148,15 +163,17 @@ impl<'a> App<'a> {
     }
 }
 
-impl<'a> Widget for &App<'a> {
+impl Widget for &App {
     fn render(self, area: Rect, buf: &mut Buffer)
     where
         Self: Sized,
     {
-        let mut rows = Vec::new();
-        retrieve_tree(0, self.root, self.alloc, &mut rows);
-        let tbl = widgets::Table::new(rows, [11, 10, 15, 4, 4]);
-        Widget::render(tbl, area, buf);
+        let Ok(root) = ProcessNode::from_pid_in(self.child.id(), &self.alloc) else {
+            // Process probably died
+            return;
+        };
+        let tree = Tree::new(root, vec![0, 11, 21, 36, 40, 44]);
+        tree.render(area, buf);
     }
 }
 
@@ -171,5 +188,5 @@ fn main() -> Result<(), std::io::Error> {
             .unwrap(),
     );
 
-    ratatui::run(move |terminal| App::new(c, &AllocInfo::new()).unwrap().run(terminal))
+    ratatui::run(move |terminal| App::new(c, AllocInfo::new()).unwrap().run(terminal))
 }
