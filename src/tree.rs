@@ -1,11 +1,5 @@
 //! Widget for displaying process tree.
-use ratatui::{
-    prelude::Buffer,
-    style::Style,
-    symbols::{border, line},
-    text::Span,
-    widgets::Widget,
-};
+use ratatui::{prelude::Buffer, style::Style, symbols::line, text::Span, widgets::Widget};
 
 use crate::minmax;
 
@@ -77,8 +71,8 @@ impl TreeInner {
     /// Renders node and all of its children.
     ///
     /// Return the height where the next node of the depth may be rendered
-    pub fn render_node<'s, S: TreeNode>(
-        &'s self,
+    pub fn render_node<S: TreeNode>(
+        &self,
         node: S,
         buf: &mut Buffer,
         depth: u16,
@@ -118,11 +112,8 @@ impl<S: TreeNode> Tree<S> {
     }
 }
 
-impl<'a, 'this, S: TreeNode> Widget for Tree<S>
-where
-    'this: 'a,
-{
-    fn render(self, area: ratatui::prelude::Rect, buf: &mut Buffer)
+impl<S: TreeNode> Widget for Tree<S> {
+    fn render(self, _area: ratatui::prelude::Rect, buf: &mut Buffer)
     where
         Self: Sized,
     {

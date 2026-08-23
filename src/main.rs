@@ -1,13 +1,8 @@
 use std::cell::RefCell;
 use std::io;
 use std::ops::DerefMut;
-use std::process::exit;
 use std::time::Duration;
-use std::{
-    error::Error,
-    io::stdout,
-    process::{Child, Command, Stdio},
-};
+use std::process::{Child, Command, Stdio};
 
 use buildmon::ProcessError;
 use buildmon::tree::{LazyRow, Tree, TreeNode};
@@ -16,14 +11,11 @@ use buildmon::{
     classifier::{ClassifierImpl, ProcessClassifier},
 };
 use bumpalo::Bump;
-use bumpalo::collections::CollectIn;
 use crossterm::event::{self, Event, KeyCode};
-use ratatui::widgets::{self, Cell, Row};
 use ratatui::{
     DefaultTerminal, Frame,
     prelude::*,
-    symbols::border,
-    widgets::{Block, Paragraph, Widget},
+    widgets::Widget,
 };
 
 #[derive(Debug)]
@@ -66,9 +58,9 @@ impl<'a> ProcessNode<'a> {
 
 impl<'a> TreeNode for ProcessNode<'a> {
     fn row<'s>(&'s self) -> LazyRow<'s, impl Iterator<Item = Span<'s>>> {
-        let class = ClassifierImpl.classify(&self.proc);
+        let class = ClassifierImpl.classify(self.proc);
         LazyRow::new([
-            Span::from(class.tool.short_repr().green().bold()),
+            class.tool.short_repr().green().bold(),
             Span::from(self.proc.executable_basename().unwrap_or_default()),
             Span::from(class.artifact.unwrap_or("UNKNOWN")),
             Span::from("TODO"),
@@ -89,7 +81,7 @@ impl<'a> TreeNode for ProcessNode<'a> {
             CompilationProcess::from_pid_in(c, &self.alloc.procs)
                 .ok()
                 .map(|proc| Self {
-                    alloc: &self.alloc,
+                    alloc: self.alloc,
                     proc,
                 })
         })
@@ -153,13 +145,10 @@ impl App {
         if !event::poll(Duration::ZERO)? {
             return Ok(());
         }
-        match event::read()? {
-            Event::Key(crossterm::event::KeyEvent {
+        if let Event::Key(crossterm::event::KeyEvent {
                 code: KeyCode::Char('q'),
                 ..
-            }) => self.exit = true,
-            _ => {}
-        }
+            }) = event::read()? { self.exit = true }
         Ok(())
     }
 }

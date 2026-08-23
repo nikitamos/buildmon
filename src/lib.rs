@@ -1,4 +1,3 @@
-#![feature(trait_alias)]
 #![allow(dead_code)]
 
 use std::{
@@ -120,7 +119,7 @@ impl<'a> CompilationProcess<'a> {
             self.cmdline
                 .split_once('\0')
                 .map(|s| s.0)
-                .unwrap_or(&self.cmdline),
+                .unwrap_or(self.cmdline),
         )
     }
 
@@ -137,6 +136,6 @@ impl<'a> CompilationProcess<'a> {
         self.pid
     }
     pub fn cmdline(&self) -> &str {
-        &self.cmdline
+        self.cmdline
     }
 }
