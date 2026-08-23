@@ -159,10 +159,9 @@ impl Widget for &App {
         Self: Sized,
     {
         let Ok(root) = ProcessNode::from_pid_in(self.child.id(), &self.alloc) else {
-            // Process probably died
             panic!("died?");
         };
-        let tree = Tree::new(root, vec![0, 11, 21, 36, 40, 44]);
+        let tree = Tree::new(root, vec![0, 11, 21, 36, 40, 44]).max_depth(16);
         tree.render(area, buf);
     }
 }

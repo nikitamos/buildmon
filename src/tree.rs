@@ -45,16 +45,21 @@ pub struct Tree<S: TreeNode> {
 struct TreeInner {
     offsets: Vec<u16>,
     branch: line::Set<'static>,
+    max_depth: u16, // TODO: determine what happens when max depth is exceeded
 }
 
 impl TreeInner {
+    /// Additional offset before row used to draw branch
+    const BRIDGE_LEN: u16 = 1;
+
     // #[inline(always)]
     // fn put_join(depth)
     #[inline(always)]
-    fn put_default_join(&self, depth: u16, height: u16, buf: &mut Buffer) {
+    fn put_default_joint(&self, depth: u16, height: u16, buf: &mut Buffer) {
         if depth != 0 {
             buf.set_string(depth - 1, height, self.branch.bottom_left, Style::default());
         }
+        buf.set_string(depth, height, self.branch.horizontal, Style::default());
     }
     #[inline(always)]
     fn connect_siblings(&self, depth: u16, sibling_height: u16, height: u16, buf: &mut Buffer) {
@@ -70,29 +75,64 @@ impl TreeInner {
     }
     /// Renders node and all of its children.
     ///
-    /// Return the height where the next node of the depth may be rendered
+    /// Returns the height where the next node of the depth may be rendered.
+    /// Returned value is strictly greater than `height`
     pub fn render_node<S: TreeNode>(
         &self,
         node: S,
         buf: &mut Buffer,
         depth: u16,
-        mut height: u16,
+        node_height: u16,
     ) -> u16 {
         let row = node.row();
-        for (cell, offset) in row.iter().zip(&self.offsets) {
-            buf.set_string(offset + depth, height, &cell.content, cell.style);
-        }
-        self.put_default_join(depth, height, buf);
+        self.print_row(buf, depth, node_height, row);
+        self.put_default_joint(depth, node_height, buf);
+        let mut height = node_height;
         height += 1;
         let mut prev_height = height;
 
         for c in node.children() {
-            self.connect_siblings(depth+1, prev_height, height, buf);
+            self.connect_siblings(depth + 1, prev_height, height, buf);
             prev_height = height;
             height = self.render_node(c, buf, depth + 1, height);
         }
 
+        // Replace bridge if node has children.
+        if height != prev_height {
+            let replacement = if node_height == 0 {
+                self.branch.top_left
+            } else {
+                self.branch.horizontal_down
+            };
+            buf.set_string(depth, node_height, replacement, Style::default());
+        }
+
         height
+    }
+
+    fn print_row<'a>(
+        &self,
+        buf: &mut Buffer,
+        depth: u16,
+        height: u16,
+        row: LazyRow<'a, impl Iterator<Item = Span<'a>>>,
+    ) {
+        let mut row = row.iter().zip(self.offsets.iter().copied());
+        let (first, offset) = row.next().expect("Rows must not be empty");
+        buf.set_string(
+            Self::BRIDGE_LEN + offset + depth,
+            height,
+            &first.content,
+            first.style,
+        );
+        for (cell, offset) in row {
+            buf.set_string(
+                Self::BRIDGE_LEN + offset + self.max_depth,
+                height,
+                &cell.content,
+                cell.style,
+            );
+        }
     }
 }
 
@@ -103,11 +143,16 @@ impl<S: TreeNode> Tree<S> {
             inner: TreeInner {
                 offsets,
                 branch: line::ROUNDED,
+                max_depth: 8,
             },
         }
     }
     pub fn branch(mut self, set: line::Set<'static>) -> Self {
         self.inner.branch = set;
+        self
+    }
+    pub fn max_depth(mut self, depth: u16) -> Self {
+        self.inner.max_depth = depth;
         self
     }
 }
