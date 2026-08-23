@@ -8,8 +8,6 @@ use std::{
 
 use bumpalo::Bump;
 
-mod bump_ext;
-
 #[inline(always)]
 pub(crate) fn minmax<T: Ord>(a: T, b: T) -> (T, T) {
     match a.cmp(&b) {
