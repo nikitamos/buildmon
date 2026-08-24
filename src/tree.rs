@@ -1,5 +1,5 @@
 //! Widget for displaying process tree.
-use ratatui::{prelude::Buffer, style::Style, symbols::line, text::Span, widgets::Widget};
+use ratatui::{prelude::*, style::Style, symbols::line, text::Span, widgets::Widget};
 
 use crate::minmax;
 
@@ -83,7 +83,12 @@ impl TreeInner {
         buf: &mut Buffer,
         depth: u16,
         node_height: u16,
+        area: &Rect,
     ) -> u16 {
+        if node_height >= area.bottom() {
+            // Out of bounds, do nothing
+            return node_height;
+        }
         let row = node.row();
         self.print_row(buf, depth, node_height, row);
         self.put_default_joint(depth, node_height, buf);
@@ -92,9 +97,12 @@ impl TreeInner {
         let mut prev_height = height;
 
         for c in node.children() {
+            if height >= area.bottom() {
+                break;
+            }
             self.connect_siblings(depth + 1, prev_height, height, buf);
             prev_height = height;
-            height = self.render_node(c, buf, depth + 1, height);
+            height = self.render_node(c, buf, depth + 1, height, area);
         }
 
         // Replace bridge if node has children.
@@ -158,12 +166,12 @@ impl<S: TreeNode> Tree<S> {
 }
 
 impl<S: TreeNode> Widget for Tree<S> {
-    fn render(self, _area: ratatui::prelude::Rect, buf: &mut Buffer)
+    fn render(self, area: ratatui::prelude::Rect, buf: &mut Buffer)
     where
         Self: Sized,
     {
         let node = self.root;
 
-        self.inner.render_node(node, buf, 0, 0);
+        self.inner.render_node(node, buf, 0, 0, &area);
     }
 }
