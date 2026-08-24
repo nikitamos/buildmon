@@ -1,12 +1,39 @@
-use bumpalo::Bump;
+use bumpalo::{Bump, collections::CollectIn};
+use libc::perror;
 use std::{
-    borrow::Cow, collections::HashMap, ffi::OsStr, fs::File, io::Read, num::IntErrorKind,
+    borrow::Cow,
+    cell::{LazyCell, OnceCell},
+    collections::HashMap,
+    ffi::{CStr, OsStr},
+    fmt::Write,
+    fs::File,
+    io::Read,
+    num::IntErrorKind,
     path::Path,
+    sync::{LazyLock, OnceLock},
 };
 
 use super::{ProcessError, Result};
 
-pub struct ProcStat {}
+static PAGE_SIZE: LazyLock<usize> = LazyLock::new(|| unsafe {
+    libc::sysconf(libc::_SC_PAGESIZE)
+        .try_into()
+        .map_err(|_| std::io::Error::last_os_error())
+        .expect("sysconf failed")
+});
+
+#[derive(Debug, Clone)]
+pub struct ProcStat {
+    /// Resident memory (in pages)
+    mem: usize,
+}
+
+impl ProcStat {
+    /// Size of resident memory in bytes
+    pub fn rss_bytes(&self) -> usize {
+        self.mem * *PAGE_SIZE
+    }
+}
 
 #[derive(Debug)]
 pub struct CompilationProcess<'a> {
@@ -81,8 +108,23 @@ impl<'a> CompilationProcess<'a> {
             .flatten())
     }
 
-    pub fn stat(&self) -> ProcStat {
-        todo!()
+    pub fn stat(&self, alloc: &Bump, stbuf: &mut String) -> Result<ProcStat> {
+        use bumpalo::collections::Vec;
+        const UTIME: usize = 13;
+        const STIMR: usize = 14;
+        const RSS: usize = 23;
+
+        stbuf.clear();
+        write!(stbuf, "/proc/{}/stat", self.pid()).unwrap();
+        let mut f = File::open(&stbuf)?;
+        f.read_to_string(stbuf)?;
+        let stat = Vec::from_iter_in(stbuf.split(' '), alloc);
+
+        Ok(ProcStat {
+            mem: stat[RSS]
+                .parse()
+                .expect("/proc/<PID>/stat reported invalid number"),
+        })
     }
 
     /// Full path to the executable

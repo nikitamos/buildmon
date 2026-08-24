@@ -1,8 +1,10 @@
+use core::fmt::NumBuffer;
 use std::cell::RefCell;
+use std::fmt::{Display, Write};
 use std::io;
-use std::ops::DerefMut;
-use std::time::Duration;
+use std::ops::{Deref, DerefMut};
 use std::process::{Child, Command, Stdio};
+use std::time::Duration;
 
 use buildmon::ProcessError;
 use buildmon::tree::{LazyRow, Tree, TreeNode};
@@ -12,11 +14,7 @@ use buildmon::{
 };
 use bumpalo::Bump;
 use crossterm::event::{self, Event, KeyCode};
-use ratatui::{
-    DefaultTerminal, Frame,
-    prelude::*,
-    widgets::Widget,
-};
+use ratatui::{DefaultTerminal, Frame, prelude::*, widgets::Widget};
 
 #[derive(Debug)]
 pub struct AllocInfo {
@@ -33,6 +31,7 @@ impl AllocInfo {
             str_buf: RefCell::new(String::with_capacity(1024)),
         }
     }
+    #[track_caller]
     pub fn str_buf(&self) -> impl DerefMut<Target = String> {
         self.str_buf.borrow_mut()
     }
@@ -49,6 +48,45 @@ pub struct ProcessNode<'a> {
     alloc: &'a AllocInfo,
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum MemUnit {
+    B(f64),
+    KiB(f64),
+    MiB(f64),
+    GiB(f64),
+    TiB(f64),
+}
+
+impl Display for MemUnit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (val, unit) = match self {
+            MemUnit::B(b) => (b, "b"),
+            MemUnit::KiB(k) => (k, "KiB"),
+            MemUnit::MiB(m) => (m, "MiB"),
+            MemUnit::GiB(g) => (g, "GiB"),
+            MemUnit::TiB(t) => (t, "TiB"),
+        };
+        write!(f, "{val:.2} {unit}",)
+    }
+}
+
+pub fn convert_mem_units(bytes: usize) -> MemUnit {
+    use MemUnit::*;
+    const KIB: usize = 1024;
+    const MIB: usize = KIB * 1024;
+    const GIB: usize = MIB * 1024;
+    const TIB: usize = GIB * 1024;
+
+    let b = bytes as f64;
+    match bytes {
+        0..KIB => B(b),
+        KIB..MIB => KiB(b / KIB as f64),
+        MIB..GIB => MiB(b / MIB as f64),
+        GIB..TIB => GiB(b / GIB as f64),
+        _ => TiB(b / TIB as f64),
+    }
+}
+
 impl<'a> ProcessNode<'a> {
     pub fn from_pid_in(pid: u32, alloc: &'a AllocInfo) -> buildmon::Result<Self> {
         let proc = CompilationProcess::from_pid_in(pid, &alloc.procs)?;
@@ -59,11 +97,20 @@ impl<'a> ProcessNode<'a> {
 impl<'a> TreeNode for ProcessNode<'a> {
     fn row<'s>(&'s self) -> LazyRow<'s, impl Iterator<Item = Span<'s>>> {
         let class = ClassifierImpl.classify(self.proc);
+        let buf = &mut self.alloc.str_buf();
+        let mem = match self.proc.stat(&self.alloc.procs, buf) {
+            Ok(stat) => {
+                buf.clear();
+                let _ = write!(buf, "{}", convert_mem_units(stat.rss_bytes()));
+                self.alloc.procs.alloc_str(buf)
+            }
+            Err(_) => "ERR",
+        };
         LazyRow::new([
             class.tool.short_repr().green().bold(),
             Span::from(self.proc.executable_basename().unwrap_or_default()),
             Span::from(class.artifact.unwrap_or("UNKNOWN")),
-            Span::from("TODO"),
+            Span::from(mem),
             Span::from("TODO"),
         ])
     }
@@ -146,9 +193,12 @@ impl App {
             return Ok(());
         }
         if let Event::Key(crossterm::event::KeyEvent {
-                code: KeyCode::Char('q'),
-                ..
-            }) = event::read()? { self.exit = true }
+            code: KeyCode::Char('q'),
+            ..
+        }) = event::read()?
+        {
+            self.exit = true
+        }
         Ok(())
     }
 }
@@ -161,7 +211,7 @@ impl Widget for &App {
         let Ok(root) = ProcessNode::from_pid_in(self.child.id(), &self.alloc) else {
             panic!("died?");
         };
-        let tree = Tree::new(root, vec![0, 11, 21, 36, 40, 44]).max_depth(16);
+        let tree = Tree::new(root, vec![0, 11, 21, 36, 50, 60]).max_depth(16);
         tree.render(area, buf);
     }
 }
