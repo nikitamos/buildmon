@@ -1,25 +1,43 @@
-use bumpalo::{Bump, collections::CollectIn};
-use libc::perror;
+use bumpalo::Bump;
 use std::{
-    borrow::Cow,
-    cell::{LazyCell, OnceCell},
-    collections::HashMap,
-    ffi::{CStr, OsStr},
-    fmt::Write,
-    fs::File,
-    io::Read,
-    num::IntErrorKind,
-    path::Path,
-    sync::{LazyLock, OnceLock},
+    borrow::Cow, collections::HashMap, ffi::OsStr, fmt::Write, fs::File, io::Read,
+    num::IntErrorKind, path::Path, sync::LazyLock,
 };
 
 use super::{ProcessError, Result};
 
-static PAGE_SIZE: LazyLock<usize> = LazyLock::new(|| unsafe {
-    libc::sysconf(libc::_SC_PAGESIZE)
+#[derive(Debug, Clone)]
+pub struct SystemInfo {
+    page_size: usize,
+    info: libc::sysinfo,
+}
+
+impl SystemInfo {
+    pub fn get() -> &'static Self {
+        &SYS_INFO
+    }
+
+    pub fn page_size(&self) -> usize {
+        self.page_size
+    }
+
+    /// Total amount of memory in bytes
+    pub fn total_ram(&self) -> usize {
+        self.info.mem_unit as usize * self.info.totalram as usize
+    }
+}
+
+static SYS_INFO: LazyLock<SystemInfo> = LazyLock::new(|| unsafe {
+    eprintln!("SYS_INFO init");
+    let mut info = std::mem::zeroed();
+    if libc::sysinfo(&mut info) != 0 {
+        panic!("sysinfo failed: {}", std::io::Error::last_os_error());
+    }
+    let page_size = libc::sysconf(libc::_SC_PAGESIZE)
         .try_into()
         .map_err(|_| std::io::Error::last_os_error())
-        .expect("sysconf failed")
+        .expect("sysconf failed");
+    SystemInfo { page_size, info }
 });
 
 #[derive(Debug, Clone)]
@@ -31,7 +49,7 @@ pub struct ProcStat {
 impl ProcStat {
     /// Size of resident memory in bytes
     pub fn rss_bytes(&self) -> usize {
-        self.mem * *PAGE_SIZE
+        self.mem * SYS_INFO.page_size
     }
 }
 

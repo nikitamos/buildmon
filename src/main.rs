@@ -7,6 +7,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use buildmon::ProcessError;
+use buildmon::proc::SystemInfo;
 use buildmon::tree::{LazyRow, Tree, TreeNode};
 use buildmon::{
     CompilationProcess,
@@ -62,12 +63,12 @@ impl Display for MemUnit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let (val, unit) = match self {
             MemUnit::B(b) => (b, "b"),
-            MemUnit::KiB(k) => (k, "KiB"),
-            MemUnit::MiB(m) => (m, "MiB"),
-            MemUnit::GiB(g) => (g, "GiB"),
-            MemUnit::TiB(t) => (t, "TiB"),
+            MemUnit::KiB(k) => (k, "K"),
+            MemUnit::MiB(m) => (m, "M"),
+            MemUnit::GiB(g) => (g, "G"),
+            MemUnit::TiB(t) => (t, "T"),
         };
-        write!(f, "{val:.2} {unit}",)
+        write!(f, "{val:.2}{unit}",)
     }
 }
 
@@ -164,6 +165,7 @@ struct App {
     exit: bool,
     child: WaitChild,
     alloc: AllocInfo,
+    info: &'static SystemInfo,
 }
 
 impl App {
@@ -172,6 +174,7 @@ impl App {
             exit: false,
             child,
             alloc,
+            info: SystemInfo::get(),
         })
     }
     pub fn run(&mut self, term: &mut DefaultTerminal) -> io::Result<()> {
@@ -193,7 +196,13 @@ impl App {
             .title_bottom(
                 Line::from_iter(["<Q>".green().bold(), "uit".cyan()])
                     .alignment(HorizontalAlignment::Left),
+            )
+            .title_bottom(
+                Line::from(format!("{} RAM", convert_mem_units(self.info.total_ram())))
+                    .alignment(HorizontalAlignment::Right)
+                    .red(),
             );
+
         let self_area = tree_block.inner(frame.area());
         frame.render_widget(tree_block, frame.area());
         frame.render_widget(self, self_area);
@@ -224,9 +233,6 @@ impl Widget for &App {
         };
         let tree = Tree::new(root, vec![0, 11, 21, 36, 50, 60]).max_depth(16);
         tree.render(area, buf);
-        // let mut rusage = unsafe { std::mem::zeroed() };
-        // unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut rusage) };
-        // rusage.ru_maxrss
     }
 }
 
