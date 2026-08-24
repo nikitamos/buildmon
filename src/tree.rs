@@ -52,25 +52,51 @@ impl TreeInner {
     /// Additional offset before row used to draw branch
     const BRIDGE_LEN: u16 = 1;
 
-    // #[inline(always)]
-    // fn put_join(depth)
     #[inline(always)]
-    fn put_default_joint(&self, depth: u16, height: u16, buf: &mut Buffer) {
+    fn put_default_joint(&self, depth: u16, height: u16, buf: &mut Buffer, area: &Rect) {
         if depth != 0 {
-            buf.set_string(depth - 1, height, self.branch.bottom_left, Style::default());
+            buf.set_string(
+                area.x + depth - 1,
+                area.y + height,
+                self.branch.bottom_left,
+                Style::default(),
+            );
         }
-        buf.set_string(depth, height, self.branch.horizontal, Style::default());
+        buf.set_string(
+            area.x + depth,
+            area.y + height,
+            self.branch.horizontal,
+            Style::default(),
+        );
     }
+
     #[inline(always)]
-    fn connect_siblings(&self, depth: u16, sibling_height: u16, height: u16, buf: &mut Buffer) {
+    fn connect_siblings(
+        &self,
+        depth: u16,
+        sibling_height: u16,
+        height: u16,
+        buf: &mut Buffer,
+        area: &Rect,
+    ) {
         if depth == 0 {
             // Technically this is unreachable since the tree always has one root
             return;
         }
         let (low, high) = minmax(sibling_height, height);
-        buf.set_string(depth - 1, low, self.branch.vertical_right, Style::default());
+        buf.set_string(
+            area.x + depth - 1,
+            area.y + low,
+            self.branch.vertical_right,
+            Style::default(),
+        );
         for y in (low + 1)..(high) {
-            buf.set_string(depth - 1, y, self.branch.vertical, Style::default());
+            buf.set_string(
+                area.x + depth - 1,
+                area.y + y,
+                self.branch.vertical,
+                Style::default(),
+            );
         }
     }
     /// Renders node and all of its children.
@@ -85,22 +111,22 @@ impl TreeInner {
         node_height: u16,
         area: &Rect,
     ) -> u16 {
-        if node_height >= area.bottom() {
-            // Out of bounds, do nothing
+        if node_height >= area.height {
             return node_height;
         }
+
         let row = node.row();
-        self.print_row(buf, depth, node_height, row);
-        self.put_default_joint(depth, node_height, buf);
+        self.print_row(buf, depth, node_height, row, area);
+        self.put_default_joint(depth, node_height, buf, area);
         let mut height = node_height;
         height += 1;
         let mut prev_height = height;
 
         for c in node.children() {
-            if height >= area.bottom() {
+            if height >= area.height {
                 break;
             }
-            self.connect_siblings(depth + 1, prev_height, height, buf);
+            self.connect_siblings(depth + 1, prev_height, height, buf, area);
             prev_height = height;
             height = self.render_node(c, buf, depth + 1, height, area);
         }
@@ -112,7 +138,12 @@ impl TreeInner {
             } else {
                 self.branch.horizontal_down
             };
-            buf.set_string(depth, node_height, replacement, Style::default());
+            buf.set_string(
+                area.x + depth,
+                area.y + node_height,
+                replacement,
+                Style::default(),
+            );
         }
 
         height
@@ -124,19 +155,20 @@ impl TreeInner {
         depth: u16,
         height: u16,
         row: LazyRow<'a, impl Iterator<Item = Span<'a>>>,
+        area: &Rect,
     ) {
         let mut row = row.iter().zip(self.offsets.iter().copied());
         let (first, offset) = row.next().expect("Rows must not be empty");
         buf.set_string(
-            Self::BRIDGE_LEN + offset + depth,
-            height,
+            area.x + Self::BRIDGE_LEN + offset + depth,
+            area.y + height,
             &first.content,
             first.style,
         );
         for (cell, offset) in row {
             buf.set_string(
-                Self::BRIDGE_LEN + offset + self.max_depth,
-                height,
+                area.x + Self::BRIDGE_LEN + offset + self.max_depth,
+                area.y + height,
                 &cell.content,
                 cell.style,
             );

@@ -14,6 +14,7 @@ use buildmon::{
 };
 use bumpalo::Bump;
 use crossterm::event::{self, Event, KeyCode};
+use ratatui::widgets;
 use ratatui::{DefaultTerminal, Frame, prelude::*, widgets::Widget};
 
 #[derive(Debug)]
@@ -185,7 +186,17 @@ impl App {
     }
 
     pub fn draw(&self, frame: &mut Frame) {
-        frame.render_widget(self, frame.area());
+        let tree_block = widgets::Block::bordered()
+            .title("Compilation Processes".italic().blue())
+            .border_set(symbols::border::LIGHT_DOUBLE_DASHED)
+            .title_alignment(HorizontalAlignment::Left)
+            .title_bottom(
+                Line::from_iter(["<Q>".green().bold(), "uit".cyan()])
+                    .alignment(HorizontalAlignment::Left),
+            );
+        let self_area = tree_block.inner(frame.area());
+        frame.render_widget(tree_block, frame.area());
+        frame.render_widget(self, self_area);
     }
 
     fn handle_events(&mut self) -> io::Result<()> {
@@ -213,6 +224,9 @@ impl Widget for &App {
         };
         let tree = Tree::new(root, vec![0, 11, 21, 36, 50, 60]).max_depth(16);
         tree.render(area, buf);
+        // let mut rusage = unsafe { std::mem::zeroed() };
+        // unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut rusage) };
+        // rusage.ru_maxrss
     }
 }
 
