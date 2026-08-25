@@ -1,8 +1,7 @@
-use core::fmt::NumBuffer;
 use std::cell::RefCell;
 use std::fmt::{Display, Write};
-use std::io::{self, Read, stdin};
-use std::ops::{Deref, DerefMut};
+use std::io::{self};
+use std::ops::DerefMut;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 

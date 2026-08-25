@@ -147,7 +147,7 @@ impl StatefulWidget for &StdStreamsWidget {
 
         cur_state.height = buffer.lines().count();
         // What to do if number of lines doesn't fit in u16?
-        let par = Paragraph::new(buf_to_text(&buffer))
+        let par = Paragraph::new(buf_to_text(buffer))
             .scroll((cur_state.offset_y as u16, cur_state.offset_x as u16))
             .wrap(Wrap { trim: false });
         par.render(area, buf);
