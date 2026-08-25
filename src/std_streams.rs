@@ -7,7 +7,7 @@ use std::process::{Child, ChildStderr, ChildStdout};
 use nonblock::NonBlockingReader;
 use ratatui::prelude::*;
 use ratatui::text::ToText;
-use ratatui::widgets::{Paragraph, Scrollbar, ScrollbarState, Wrap};
+use ratatui::widgets::{Paragraph, ScrollDirection, ScrollbarState, Wrap};
 
 // #[derive(Debug)]
 pub struct StdStreamsWidget {
@@ -33,7 +33,15 @@ struct StreamState {
 
 impl StreamState {
     pub fn vertical_scrollbar(&self) -> ScrollbarState {
-        ScrollbarState::new(self.height).position(self.offset_x)
+        ScrollbarState::new(self.height).position(self.offset_y)
+    }
+    /// Scrolls content upwards, i.e. reduces number of the first line shown
+    pub fn scroll_upwards(&mut self, count: usize) {
+        self.offset_y = self.offset_y.saturating_sub(count);
+    }
+    /// Scrolls content downwards, i.e. increases the number of the first line shown
+    pub fn scroll_downwards(&mut self, count: usize) {
+        self.offset_y = self.offset_y.saturating_add(count);
     }
 }
 
@@ -67,6 +75,12 @@ impl StdStreamsWidgetState {
         self.active = match self.active() {
             ActiveStream::Stderr => ActiveStream::Stdout,
             ActiveStream::Stdout => ActiveStream::Stderr,
+        }
+    }
+    pub fn vertical_scroll(&mut self, direction: ScrollDirection, count: usize) {
+        match direction {
+            ScrollDirection::Forward => self.current_mut().scroll_downwards(count),
+            ScrollDirection::Backward => self.current_mut().scroll_upwards(count),
         }
     }
 }

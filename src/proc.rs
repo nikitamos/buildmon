@@ -28,7 +28,6 @@ impl SystemInfo {
 }
 
 static SYS_INFO: LazyLock<SystemInfo> = LazyLock::new(|| unsafe {
-    eprintln!("SYS_INFO init");
     let mut info = std::mem::zeroed();
     if libc::sysinfo(&mut info) != 0 {
         panic!("sysinfo failed: {}", std::io::Error::last_os_error());

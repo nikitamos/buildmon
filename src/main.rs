@@ -1,7 +1,7 @@
 use core::fmt::NumBuffer;
 use std::cell::RefCell;
 use std::fmt::{Display, Write};
-use std::io;
+use std::io::{self, Read, stdin};
 use std::ops::{Deref, DerefMut};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
@@ -15,8 +15,12 @@ use buildmon::{
     classifier::{ClassifierImpl, ProcessClassifier},
 };
 use bumpalo::Bump;
-use crossterm::event::{self, Event, KeyCode, KeyEvent};
-use ratatui::widgets::{self};
+use crossterm::ExecutableCommand;
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+    MouseEvent, MouseEventKind,
+};
+use ratatui::widgets::{self, Scrollbar};
 use ratatui::{DefaultTerminal, Frame, prelude::*, widgets::Widget};
 
 #[derive(Debug)]
@@ -184,6 +188,7 @@ impl App {
     }
 
     pub fn run(&mut self, term: &mut DefaultTerminal) -> io::Result<()> {
+        term.backend_mut().execute(EnableMouseCapture)?;
         while !self.exit {
             self.alloc.procs.reset();
             self.alloc.arena.reset();
@@ -192,6 +197,7 @@ impl App {
             term.draw(|f| self.draw(f))?;
         }
         self.child.kill()?;
+        term.backend_mut().execute(DisableMouseCapture)?;
         Ok(())
     }
 
@@ -224,14 +230,22 @@ impl App {
             .border_type(widgets::BorderType::Thick)
             .title_bottom(Line::from_iter(["S".green().bold(), "witch".cyan()]));
 
-        let output_area = out_block.inner(out_block_area);
+        let output_scrollbar = Scrollbar::new(widgets::ScrollbarOrientation::VerticalRight)
+            // .thumb_symbol(symbols::border::THICK.vertical_right)
+            .track_symbol(Some(symbols::border::THICK.vertical_right));
 
+        let output_area = out_block.inner(out_block_area);
         let tree_area = tree_block.inner(tree_block_area);
         frame.render_widget(root_block, frame.area());
         frame.render_widget(tree_block, tree_block_area);
         frame.render_widget(self as &Self, tree_area);
         frame.render_widget(out_block, out_block_area);
         frame.render_stateful_widget(&self.output, output_area, &mut self.output_state);
+        frame.render_stateful_widget(
+            output_scrollbar,
+            out_block_area.inner(Margin::new(0, 1)),
+            &mut self.output_state.vertical_scrollbar(),
+        );
     }
 
     pub fn update(&mut self) {
@@ -259,10 +273,38 @@ impl App {
             }) => {
                 self.output_state.switch();
             }
+            Event::Mouse(MouseEvent {
+                column,
+                row,
+                kind,
+                modifiers,
+            }) => {
+                self.handle_mouse_event(Position::new(column, row), kind, modifiers);
+            }
             _ => (),
         }
         Ok(())
     }
+
+    fn handle_mouse_event(
+        &mut self,
+        _pos: Position,
+        kind: MouseEventKind,
+        _modifiers: KeyModifiers,
+    ) {
+        eprintln!("scroll");
+        match kind {
+            MouseEventKind::ScrollDown => {
+                self.output_state
+                    .vertical_scroll(widgets::ScrollDirection::Forward, 1);
+            }
+            MouseEventKind::ScrollUp => self
+                .output_state
+                .vertical_scroll(widgets::ScrollDirection::Backward, 1),
+            _ => (),
+        }
+    }
+
     fn output_title(&self) -> Span<'_> {
         match self.output_state.active() {
             ActiveStream::Stderr => "stderr".red().underlined(),
