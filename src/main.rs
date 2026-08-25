@@ -8,14 +8,15 @@ use std::time::Duration;
 
 use buildmon::ProcessError;
 use buildmon::proc::SystemInfo;
+use buildmon::std_streams::{ActiveStream, StdStreamsWidget, StdStreamsWidgetState};
 use buildmon::tree::{LazyRow, Tree, TreeNode};
 use buildmon::{
     CompilationProcess,
     classifier::{ClassifierImpl, ProcessClassifier},
 };
 use bumpalo::Bump;
-use crossterm::event::{self, Event, KeyCode};
-use ratatui::widgets;
+use crossterm::event::{self, Event, KeyCode, KeyEvent};
+use ratatui::widgets::{self};
 use ratatui::{DefaultTerminal, Frame, prelude::*, widgets::Widget};
 
 #[derive(Debug)]
@@ -160,41 +161,47 @@ impl Drop for WaitChild {
     }
 }
 
-#[derive(Debug)]
+// #[derive(Debug)]
 struct App {
     exit: bool,
     child: WaitChild,
     alloc: AllocInfo,
     info: &'static SystemInfo,
+    output: StdStreamsWidget,
+    output_state: StdStreamsWidgetState,
 }
 
 impl App {
-    pub fn new(child: WaitChild, alloc: AllocInfo) -> Result<Self, ProcessError> {
+    pub fn new(mut child: WaitChild, alloc: AllocInfo) -> Result<Self, ProcessError> {
         Ok(Self {
+            output: StdStreamsWidget::new(&mut child),
+            output_state: Default::default(),
             exit: false,
             child,
             alloc,
             info: SystemInfo::get(),
         })
     }
+
     pub fn run(&mut self, term: &mut DefaultTerminal) -> io::Result<()> {
         while !self.exit {
             self.alloc.procs.reset();
             self.alloc.arena.reset();
-            term.draw(|f| self.draw(f))?;
             self.handle_events()?;
+            self.update();
+            term.draw(|f| self.draw(f))?;
         }
         self.child.kill()?;
         Ok(())
     }
 
-    pub fn draw(&self, frame: &mut Frame) {
-        let tree_block = widgets::Block::bordered()
-            .title("Compilation Processes".italic().blue())
-            .border_set(symbols::border::LIGHT_DOUBLE_DASHED)
+    pub fn draw(&mut self, frame: &mut Frame) {
+        let root_block = widgets::Block::bordered()
+            .title("Build status".italic().yellow().bold())
+            .border_set(symbols::border::DOUBLE)
             .title_alignment(HorizontalAlignment::Left)
             .title_bottom(
-                Line::from_iter(["<Q>".green().bold(), "uit".cyan()])
+                Line::from_iter(["Q".green().bold(), "uit".cyan()])
                     .alignment(HorizontalAlignment::Left),
             )
             .title_bottom(
@@ -203,23 +210,64 @@ impl App {
                     .red(),
             );
 
-        let self_area = tree_block.inner(frame.area());
-        frame.render_widget(tree_block, frame.area());
-        frame.render_widget(self, self_area);
+        let [tree_block_area, out_block_area] = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+            .areas(root_block.inner(frame.area()));
+
+        let tree_block = widgets::Block::bordered()
+            .border_type(widgets::BorderType::HeavyTripleDashed)
+            .title("Processes".blue().underlined());
+
+        let out_block = widgets::Block::bordered()
+            .title(self.output_title())
+            .border_type(widgets::BorderType::Thick)
+            .title_bottom(Line::from_iter(["S".green().bold(), "witch".cyan()]));
+
+        let output_area = out_block.inner(out_block_area);
+
+        let tree_area = tree_block.inner(tree_block_area);
+        frame.render_widget(root_block, frame.area());
+        frame.render_widget(tree_block, tree_block_area);
+        frame.render_widget(self as &Self, tree_area);
+        frame.render_widget(out_block, out_block_area);
+        frame.render_stateful_widget(&self.output, output_area, &mut self.output_state);
+    }
+
+    pub fn update(&mut self) {
+        let (e1, e2) = self.output.update();
+        if let Err(e) = e1 {
+            eprintln!("Failed to read stdout: {e}");
+        }
+        if let Err(e) = e2 {
+            eprintln!("Failed to read stderr: {e}");
+        }
     }
 
     fn handle_events(&mut self) -> io::Result<()> {
         if !event::poll(Duration::ZERO)? {
             return Ok(());
         }
-        if let Event::Key(crossterm::event::KeyEvent {
-            code: KeyCode::Char('q'),
-            ..
-        }) = event::read()?
-        {
-            self.exit = true
+        match event::read()? {
+            Event::Key(KeyEvent {
+                code: KeyCode::Char('q'),
+                ..
+            }) => self.exit = true,
+            Event::Key(KeyEvent {
+                code: KeyCode::Char('s'),
+                ..
+            }) => {
+                self.output_state.switch();
+            }
+            _ => (),
         }
         Ok(())
+    }
+    fn output_title(&self) -> Span<'_> {
+        match self.output_state.active() {
+            ActiveStream::Stderr => "stderr".red().underlined(),
+            ActiveStream::Stdout => "stdout".green().underlined(),
+        }
     }
 }
 
@@ -241,8 +289,8 @@ fn main() -> Result<(), std::io::Error> {
     let c = WaitChild(
         Command::new(args.nth(1).expect("Program to start expected"))
             .args(args)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
             .unwrap(),
     );

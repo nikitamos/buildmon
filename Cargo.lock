@@ -96,6 +96,7 @@ dependencies = [
  "bumpalo",
  "crossterm",
  "libc",
+ "nonblock",
  "ratatui",
 ]
 
@@ -681,6 +682,15 @@ checksum = "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
 dependencies = [
  "memchr",
  "minimal-lexical",
+]
+
+[[package]]
+name = "nonblock"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "51c7a4f22e5f2e2bd805d6ab56f1ae87eb1815673e1b452048896fb687a8a3d4"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
