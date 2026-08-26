@@ -215,14 +215,10 @@ impl App {
                     .red(),
             );
 
-        let [tree_block_area, out_block_area] = Layout::default()
+        let [tree_area, out_block_area] = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
             .areas(root_block.inner(frame.area()));
-
-        let tree_block = widgets::Block::bordered()
-            .border_type(widgets::BorderType::HeavyTripleDashed)
-            .title("Processes".blue().underlined());
 
         let out_block = widgets::Block::bordered()
             .title(self.output_title())
@@ -234,9 +230,7 @@ impl App {
             .track_symbol(Some(symbols::border::THICK.vertical_right));
 
         let output_area = out_block.inner(out_block_area);
-        let tree_area = tree_block.inner(tree_block_area);
         frame.render_widget(root_block, frame.area());
-        frame.render_widget(tree_block, tree_block_area);
         frame.render_widget(self as &Self, tree_area);
         frame.render_widget(out_block, out_block_area);
         frame.render_stateful_widget(&self.output, output_area, &mut self.output_state);
@@ -320,7 +314,13 @@ impl Widget for &App {
         let Ok(root) = ProcessNode::from_pid_in(self.child.id(), &self.alloc) else {
             panic!("died?");
         };
-        let tree = Tree::new(root, vec![0, 11, 21, 36, 50, 60]).max_depth(16);
+        let tree = Tree::new(root, vec![0, 11, 21, 36, 50, 60])
+            .max_depth(16)
+            .block(
+                widgets::Block::bordered()
+                    .border_type(widgets::BorderType::HeavyTripleDashed)
+                    .title("Processes".blue().underlined()),
+            );
         tree.render(area, buf);
     }
 }
