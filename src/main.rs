@@ -8,12 +8,13 @@ use std::time::Duration;
 use buildmon::ProcessError;
 use buildmon::proc::SystemInfo;
 use buildmon::std_streams::{ActiveStream, StdStreamsWidget, StdStreamsWidgetState};
-use buildmon::tree::{LazyRow, Tree, TreeNode};
+use buildmon::tree::{EagerTreeNode, LazyRow, Tree, TreeNode, TreeState};
 use buildmon::{
     CompilationProcess,
     classifier::{ClassifierImpl, ProcessClassifier},
 };
 use bumpalo::Bump;
+use bumpalo::collections::CollectIn;
 use crossterm::ExecutableCommand;
 use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
@@ -49,9 +50,15 @@ impl Default for AllocInfo {
     }
 }
 
+// TODO: consider migrating usize to u16
+#[derive(Debug, Clone)]
 pub struct ProcessNode<'a> {
     proc: &'a CompilationProcess<'a>,
     alloc: &'a AllocInfo,
+    children: &'a [Option<ProcessNode<'a>>],
+    depth: usize,
+    height: usize,
+    children_count: usize,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -95,8 +102,30 @@ pub fn convert_mem_units(bytes: usize) -> MemUnit {
 
 impl<'a> ProcessNode<'a> {
     pub fn from_pid_in(pid: u32, alloc: &'a AllocInfo) -> buildmon::Result<Self> {
+        use bumpalo::collections::Vec;
         let proc = CompilationProcess::from_pid_in(pid, &alloc.procs)?;
-        Ok(Self { proc, alloc })
+        let children = Vec::from_iter_in(
+            proc.children_pids(&alloc.arena, &mut alloc.str_buf())?,
+            &alloc.arena,
+        );
+        let children = alloc.procs.alloc_slice_fill_with(children.len(), |i| {
+            ProcessNode::from_pid_in(children[i] as u32, alloc).ok()
+        });
+        let (depth, height, count) = children.iter().fold((0, 0, 0), |(d, h, count), c| {
+            if let Some(c) = c {
+                (d.max(c.depth), h + c.height, count + 1)
+            } else {
+                (d, h, count)
+            }
+        });
+        Ok(Self {
+            proc,
+            alloc,
+            children,
+            depth: depth + 1, // TODO: is 1 here necessary?
+            height: height + 1,
+            children_count: count,
+        })
     }
 }
 
@@ -122,22 +151,21 @@ impl<'a> TreeNode for ProcessNode<'a> {
     }
 
     fn children(self) -> impl Iterator<Item = Self> {
-        use bumpalo::collections::Vec;
-        let mut stbuf = self.alloc.str_buf();
-        let children = self
-            .proc
-            .children_pids(&self.alloc.arena, &mut stbuf)
-            .map(|pids| Vec::from_iter_in(pids, &self.alloc.arena))
-            .unwrap_or_else(|_| Vec::new_in(&self.alloc.arena));
+        self.children.iter().flatten().cloned()
+    }
+}
 
-        children.into_iter().filter_map(move |c| {
-            CompilationProcess::from_pid_in(c, &self.alloc.procs)
-                .ok()
-                .map(|proc| Self {
-                    alloc: self.alloc,
-                    proc,
-                })
-        })
+impl<'a> EagerTreeNode for ProcessNode<'a> {
+    fn subtree_height(&self) -> usize {
+        self.height
+    }
+
+    fn subtree_depth(&self) -> u16 {
+        self.depth as u16
+    }
+
+    fn children(&self) -> impl Iterator<Item = &Self> {
+        self.children.iter().flatten()
     }
 }
 
@@ -172,6 +200,7 @@ struct App {
     info: &'static SystemInfo,
     output: StdStreamsWidget,
     output_state: StdStreamsWidgetState,
+    tree_state: TreeState,
 }
 
 impl App {
@@ -183,6 +212,7 @@ impl App {
             child,
             alloc,
             info: SystemInfo::get(),
+            tree_state: Default::default(),
         })
     }
 
@@ -226,12 +256,10 @@ impl App {
             .title_bottom(Line::from_iter(["S".green().bold(), "witch".cyan()]));
 
         let output_scrollbar = Scrollbar::new(widgets::ScrollbarOrientation::VerticalRight)
-            // .thumb_symbol(symbols::border::THICK.vertical_right)
             .track_symbol(Some(symbols::border::THICK.vertical_right));
 
         let output_area = out_block.inner(out_block_area);
         frame.render_widget(root_block, frame.area());
-        frame.render_widget(self as &Self, tree_area);
         frame.render_widget(out_block, out_block_area);
         frame.render_stateful_widget(&self.output, output_area, &mut self.output_state);
         frame.render_stateful_widget(
@@ -239,6 +267,7 @@ impl App {
             out_block_area.inner(Margin::new(0, 1)),
             &mut self.output_state.vertical_scrollbar(),
         );
+        self.render_tree(tree_area, frame);
     }
 
     pub fn update(&mut self) {
@@ -288,12 +317,15 @@ impl App {
         eprintln!("scroll");
         match kind {
             MouseEventKind::ScrollDown => {
+                self.tree_state.scroll.next();
                 self.output_state
                     .vertical_scroll(widgets::ScrollDirection::Forward, 1);
             }
-            MouseEventKind::ScrollUp => self
-                .output_state
-                .vertical_scroll(widgets::ScrollDirection::Backward, 1),
+            MouseEventKind::ScrollUp => {
+                self.tree_state.scroll.prev();
+                self.output_state
+                    .vertical_scroll(widgets::ScrollDirection::Backward, 1)
+            }
             _ => (),
         }
     }
@@ -304,24 +336,17 @@ impl App {
             ActiveStream::Stdout => "stdout".green().underlined(),
         }
     }
-}
 
-impl Widget for &App {
-    fn render(self, area: Rect, buf: &mut Buffer)
-    where
-        Self: Sized,
-    {
+    fn render_tree(&mut self, area: Rect, frame: &mut Frame) {
         let Ok(root) = ProcessNode::from_pid_in(self.child.id(), &self.alloc) else {
-            panic!("died?");
+            return;
         };
-        let tree = Tree::new(root, vec![5, 15, 20, 8, 5])
-            .max_depth(16)
-            .block(
-                widgets::Block::bordered()
-                    .border_type(widgets::BorderType::HeavyTripleDashed)
-                    .title("Processes".blue().underlined()),
-            );
-        tree.render(area, buf);
+        let tree = Tree::new(root, vec![5, 15, 20, 8, 5]).max_depth(16).block(
+            widgets::Block::bordered()
+                .border_type(widgets::BorderType::HeavyTripleDashed)
+                .title("Processes".blue().underlined()),
+        );
+        frame.render_stateful_widget(&tree, area, &mut self.tree_state);
     }
 }
 

@@ -72,9 +72,9 @@ pub struct Tree<'a, S: TreeNode> {
     scrollbar: Option<Scrollbar<'a>>,
 }
 
-pub struct TreeState<S: EagerTreeNode> {
+#[derive(Debug, Clone, Default)]
+pub struct TreeState {
     pub scroll: ScrollbarState,
-    pub node: S,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +88,13 @@ struct TreeInner {
 struct NodeRenderContext {
     area: Rect,
     scroll: u16,
+}
+
+impl NodeRenderContext {
+    #[inline(always)]
+    fn is_node_within(&self, node_height: u16) -> bool {
+        self.scroll <= node_height && node_height < self.area.height + self.scroll
+    }
 }
 
 impl TreeInner {
@@ -136,7 +143,7 @@ impl TreeInner {
                 Style::default(),
             );
         }
-        for y in (low + 1).saturating_sub(ctx.scroll)..(high) {
+        for y in (low + 1).saturating_sub(ctx.scroll)..(high.saturating_sub(ctx.scroll)) {
             buf.set_string(
                 area.x + depth - 1,
                 area.y + y,
@@ -157,7 +164,13 @@ impl TreeInner {
         node_height: u16,
         ctx: &NodeRenderContext,
     ) -> u16 {
-        if node_height >= ctx.area.height {
+        if node_height >= ctx.area.height + ctx.scroll {
+            eprintln!(
+                "rejected: {:?}, h={node_height}, scroll={}, area={:?}",
+                node.row().iter().next().unwrap(),
+                ctx.scroll,
+                ctx.area
+            );
             return node_height;
         }
 
@@ -172,9 +185,6 @@ impl TreeInner {
         let mut prev_height = height;
 
         for c in node.children() {
-            if height >= ctx.area.height {
-                break;
-            }
             self.connect_siblings(depth + 1, prev_height, height, buf, &ctx);
             prev_height = height;
             height = self.render_node(c, buf, depth + 1, height, &ctx);
@@ -210,7 +220,7 @@ impl TreeInner {
     ) {
         let mut row = row.iter().zip(self.column_lens.iter().copied());
         let (first, len) = row.next().expect("Rows must not be empty");
-        Self::print_string_limited(
+        Self::print_string_sentinel(
             buf,
             area.x + Self::BRIDGE_LEN + x,
             area.y + y,
@@ -220,7 +230,7 @@ impl TreeInner {
         );
         let mut offset = len + 1;
         for (cell, len) in row {
-            Self::print_string_limited(
+            Self::print_string_sentinel(
                 buf,
                 area.x + Self::BRIDGE_LEN + offset + self.max_depth,
                 area.y + y,
@@ -233,19 +243,19 @@ impl TreeInner {
     }
 
     #[inline(always)]
-    fn print_string_limited(
+    fn print_string_sentinel(
         buf: &mut Buffer,
         x: u16,
         y: u16,
         string: &str,
         style: Style,
-        limit: usize,
+        max_width: usize,
     ) {
-        buf.set_stringn(x, y, string, limit, style).0;
+        buf.set_stringn(x, y, string, max_width, style).0;
         // TODO: proper width counting
         let width = string.chars().count();
-        if limit < width {
-            buf.set_string(x + limit as u16 - 1, y, ELLIPSIS, Style::default());
+        if max_width < width {
+            buf.set_string(x + max_width as u16 - 1, y, ELLIPSIS, Style::default());
         }
     }
 }
@@ -365,12 +375,15 @@ impl<'a, S> StatefulWidget for &Tree<'a, S>
 where
     S: EagerTreeNode,
 {
-    type State = TreeState<S>;
+    type State = TreeState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let mut inner = self.inner.clone();
         inner.max_depth = self.root.subtree_depth();
-        state.scroll = state.scroll.content_length(self.root.subtree_height());
+        state.scroll = state
+            .scroll
+            .content_length(self.root.subtree_height())
+            .viewport_content_length(area.height as usize);
 
         let area = self.render_frame(area, buf, &mut state.scroll);
         self.inner.render_node(
