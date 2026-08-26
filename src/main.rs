@@ -314,7 +314,7 @@ impl Widget for &App {
         let Ok(root) = ProcessNode::from_pid_in(self.child.id(), &self.alloc) else {
             panic!("died?");
         };
-        let tree = Tree::new(root, vec![0, 11, 21, 36, 50, 60])
+        let tree = Tree::new(root, vec![5, 15, 20, 8, 5])
             .max_depth(16)
             .block(
                 widgets::Block::bordered()

@@ -1,6 +1,4 @@
 //! Widget for displaying process tree.
-use std::marker::PhantomData;
-
 use ratatui::{
     prelude::*,
     style::Style,
@@ -8,6 +6,8 @@ use ratatui::{
     text::Span,
     widgets::{Block, Scrollbar, ScrollbarState, Widget},
 };
+
+const ELLIPSIS: &str = "…";
 
 use crate::minmax;
 
@@ -79,9 +79,9 @@ pub struct TreeState<S: EagerTreeNode> {
 
 #[derive(Debug, Clone)]
 struct TreeInner {
-    offsets: Vec<u16>,
+    column_lens: Vec<u16>,
     branch: line::Set<'static>,
-    max_depth: u16, // TODO: determine what happens when max depth is exceeded
+    max_depth: u16, // TODO: determine what should happen when max depth is exceeded
 }
 
 #[derive(Debug)]
@@ -208,31 +208,54 @@ impl TreeInner {
         row: LazyRow<'a, impl Iterator<Item = Span<'a>>>,
         area: &Rect,
     ) {
-        let mut row = row.iter().zip(self.offsets.iter().copied());
-        let (first, offset) = row.next().expect("Rows must not be empty");
-        buf.set_string(
-            area.x + Self::BRIDGE_LEN + offset + x,
+        let mut row = row.iter().zip(self.column_lens.iter().copied());
+        let (first, len) = row.next().expect("Rows must not be empty");
+        Self::print_string_limited(
+            buf,
+            area.x + Self::BRIDGE_LEN + x,
             area.y + y,
             &first.content,
             first.style,
+            len as usize,
         );
-        for (cell, offset) in row {
-            buf.set_string(
+        let mut offset = len + 1;
+        for (cell, len) in row {
+            Self::print_string_limited(
+                buf,
                 area.x + Self::BRIDGE_LEN + offset + self.max_depth,
                 area.y + y,
                 &cell.content,
                 cell.style,
+                len as usize,
             );
+            offset += len + 1;
+        }
+    }
+
+    #[inline(always)]
+    fn print_string_limited(
+        buf: &mut Buffer,
+        x: u16,
+        y: u16,
+        string: &str,
+        style: Style,
+        limit: usize,
+    ) {
+        buf.set_stringn(x, y, string, limit, style).0;
+        // TODO: proper width counting
+        let width = string.chars().count();
+        if limit < width {
+            buf.set_string(x + limit as u16 - 1, y, ELLIPSIS, Style::default());
         }
     }
 }
 
 impl<'a, S: TreeNode> Tree<'a, S> {
-    pub fn new(root: S, offsets: Vec<u16>) -> Self {
+    pub fn new(root: S, column_lens: Vec<u16>) -> Self {
         Self {
             root,
             inner: TreeInner {
-                offsets,
+                column_lens,
                 branch: line::ROUNDED,
                 max_depth: 8,
             },
