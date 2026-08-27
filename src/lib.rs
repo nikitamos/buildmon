@@ -37,6 +37,7 @@ impl std::error::Error for ProcessError {}
 pub type Result<T, E = ProcessError> = std::result::Result<T, E>;
 
 pub mod classifier;
+pub mod component;
 pub mod std_streams;
 pub mod tree;
 

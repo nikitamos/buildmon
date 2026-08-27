@@ -6,6 +6,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use buildmon::ProcessError;
+use buildmon::component::{Component, ComponentState};
 use buildmon::proc::SystemInfo;
 use buildmon::std_streams::{ActiveStream, StdStreamsWidget, StdStreamsWidgetState};
 use buildmon::tree::{EagerTreeNode, LazyRow, Tree, TreeNode, TreeState};
@@ -14,14 +15,13 @@ use buildmon::{
     classifier::{ClassifierImpl, ProcessClassifier},
 };
 use bumpalo::Bump;
-use bumpalo::collections::CollectIn;
 use crossterm::ExecutableCommand;
 use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
     MouseEvent, MouseEventKind,
 };
 use ratatui::widgets::{self, Scrollbar};
-use ratatui::{DefaultTerminal, Frame, prelude::*, widgets::Widget};
+use ratatui::{DefaultTerminal, Frame, prelude::*};
 
 #[derive(Debug)]
 pub struct AllocInfo {
@@ -199,8 +199,8 @@ struct App {
     alloc: AllocInfo,
     info: &'static SystemInfo,
     output: StdStreamsWidget,
-    output_state: StdStreamsWidgetState,
-    tree_state: TreeState,
+    output_state: ComponentState<StdStreamsWidgetState>,
+    tree_state: ComponentState<TreeState>,
 }
 
 impl App {
@@ -212,7 +212,7 @@ impl App {
             child,
             alloc,
             info: SystemInfo::get(),
-            tree_state: Default::default(),
+            tree_state: ComponentState::<TreeState>::default().focus(true),
         })
     }
 
@@ -252,7 +252,7 @@ impl App {
 
         let out_block = widgets::Block::bordered()
             .title(self.output_title())
-            .border_type(widgets::BorderType::Thick)
+            .border_set(Self::border_set(self.output_state.focus))
             .title_bottom(Line::from_iter(["S".green().bold(), "witch".cyan()]));
 
         let output_scrollbar = Scrollbar::new(widgets::ScrollbarOrientation::VerticalRight)
@@ -261,7 +261,7 @@ impl App {
         let output_area = out_block.inner(out_block_area);
         frame.render_widget(root_block, frame.area());
         frame.render_widget(out_block, out_block_area);
-        frame.render_stateful_widget(&self.output, output_area, &mut self.output_state);
+        frame.render_stateful_widget(Component(&self.output), output_area, &mut self.output_state);
         frame.render_stateful_widget(
             output_scrollbar,
             out_block_area.inner(Margin::new(0, 1)),
@@ -295,6 +295,13 @@ impl App {
             }) => {
                 self.output_state.switch();
             }
+            Event::Key(KeyEvent {
+                code: KeyCode::Tab, ..
+            }) => self.focus_next(),
+            Event::Key(KeyEvent {
+                code: KeyCode::BackTab,
+                ..
+            }) => self.focus_prev(),
             Event::Mouse(MouseEvent {
                 column,
                 row,
@@ -310,23 +317,31 @@ impl App {
 
     fn handle_mouse_event(
         &mut self,
-        _pos: Position,
+        pos: Position,
         kind: MouseEventKind,
         _modifiers: KeyModifiers,
     ) {
-        eprintln!("scroll");
+        let Some(scroll_state) = self.current_scrollbar(pos) else {
+            return;
+        };
         match kind {
             MouseEventKind::ScrollDown => {
-                self.tree_state.scroll.next();
-                self.output_state
-                    .vertical_scroll(widgets::ScrollDirection::Forward, 1);
+                scroll_state.next();
             }
             MouseEventKind::ScrollUp => {
-                self.tree_state.scroll.prev();
-                self.output_state
-                    .vertical_scroll(widgets::ScrollDirection::Backward, 1)
+                scroll_state.prev();
             }
             _ => (),
+        }
+    }
+
+    fn current_scrollbar(&mut self, pos: Position) -> Option<&mut widgets::ScrollbarState> {
+        if self.output_state.area.contains(pos) {
+            Some(self.output_state.vertical_scrollbar())
+        } else if self.tree_state.area.contains(pos) {
+            Some(&mut self.tree_state.scroll)
+        } else {
+            None
         }
     }
 
@@ -343,10 +358,35 @@ impl App {
         };
         let tree = Tree::new(root, vec![5, 15, 20, 8, 5]).max_depth(16).block(
             widgets::Block::bordered()
-                .border_type(widgets::BorderType::HeavyTripleDashed)
+                .border_set(Self::border_set(self.tree_state.focus))
                 .title("Processes".blue().underlined()),
         );
-        frame.render_stateful_widget(&tree, area, &mut self.tree_state);
+        frame.render_stateful_widget(Component(&tree), area, &mut self.tree_state);
+    }
+    fn focus_next(&mut self) {
+        if self.tree_state.focus {
+            self.tree_state.focus = false;
+            self.output_state.focus = true;
+        } else if self.output_state.focus {
+            self.tree_state.focus = true;
+            self.output_state.focus = false;
+        }
+    }
+    fn focus_prev(&mut self) {
+        if self.tree_state.focus {
+            self.tree_state.focus = true;
+            self.output_state.focus = false;
+        } else if self.output_state.focus {
+            self.tree_state.focus = false;
+            self.output_state.focus = true;
+        }
+    }
+    fn border_set(focused: bool) -> symbols::border::Set<'static> {
+        if focused {
+            symbols::border::THICK
+        } else {
+            symbols::border::HEAVY_TRIPLE_DASHED
+        }
     }
 }
 

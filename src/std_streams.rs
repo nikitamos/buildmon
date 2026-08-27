@@ -26,22 +26,30 @@ pub enum ActiveStream {
 
 #[derive(Debug, Clone, Default)]
 struct StreamState {
-    height: usize,
+    vscroll: ScrollbarState,
     offset_x: usize,
-    offset_y: usize,
 }
 
 impl StreamState {
-    pub fn vertical_scrollbar(&self) -> ScrollbarState {
-        ScrollbarState::new(self.height).position(self.offset_y)
-    }
     /// Scrolls content upwards, i.e. reduces number of the first line shown
     pub fn scroll_upwards(&mut self, count: usize) {
-        self.offset_y = self.offset_y.saturating_sub(count);
+        self.set_vscroll_pos(self.vscroll.get_position().saturating_sub(count));
     }
     /// Scrolls content downwards, i.e. increases the number of the first line shown
     pub fn scroll_downwards(&mut self, count: usize) {
-        self.offset_y = self.offset_y.saturating_add(count);
+        self.set_vscroll_pos(self.vscroll.get_position().saturating_add(count));
+    }
+    fn set_vscroll_pos(&mut self, pos: usize) {
+        self.vscroll = self.vscroll.position(pos)
+    }
+    pub fn set_height(&mut self, height: usize) {
+        self.vscroll = self.vscroll.content_length(height);
+    }
+    pub fn offset_x(&self) -> usize {
+        self.offset_x
+    }
+    pub fn offset_y(&self) -> usize {
+        self.vscroll.get_position()
     }
 }
 
@@ -65,8 +73,8 @@ impl StdStreamsWidgetState {
             ActiveStream::Stdout => &mut self.stdout,
         }
     }
-    pub fn vertical_scrollbar(&self) -> ScrollbarState {
-        self.current().vertical_scrollbar()
+    pub fn vertical_scrollbar(&mut self) -> &mut ScrollbarState {
+        &mut self.current_mut().vscroll
     }
     pub fn active(&self) -> ActiveStream {
         self.active
@@ -145,10 +153,10 @@ impl StatefulWidget for &StdStreamsWidget {
         };
         let cur_state = state.current_mut();
 
-        cur_state.height = buffer.lines().count();
+        cur_state.set_height(buffer.lines().count());
         // What to do if number of lines doesn't fit in u16?
         let par = Paragraph::new(buf_to_text(buffer))
-            .scroll((cur_state.offset_y as u16, cur_state.offset_x as u16))
+            .scroll((cur_state.offset_y() as u16, cur_state.offset_x() as u16))
             .wrap(Wrap { trim: false });
         par.render(area, buf);
     }
