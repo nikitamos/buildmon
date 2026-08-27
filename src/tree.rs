@@ -92,7 +92,7 @@ struct NodeRenderContext {
 
 impl NodeRenderContext {
     #[inline(always)]
-    fn is_node_within(&self, node_height: u16) -> bool {
+    fn is_node_visible(&self, node_height: u16) -> bool {
         self.scroll <= node_height && node_height < self.area.height + self.scroll
     }
 }
@@ -135,7 +135,7 @@ impl TreeInner {
             return;
         }
         let (low, high) = minmax(sibling_height, height);
-        if low >= ctx.scroll {
+        if ctx.is_node_visible(low) {
             buf.set_string(
                 area.x + depth - 1,
                 area.y + low - ctx.scroll,
