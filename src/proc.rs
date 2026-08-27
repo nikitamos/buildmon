@@ -1,7 +1,15 @@
 use bumpalo::Bump;
 use std::{
-    borrow::Cow, collections::HashMap, ffi::OsStr, fmt::Write, fs::File, io::Read,
-    num::IntErrorKind, path::Path, sync::LazyLock,
+    borrow::Cow,
+    collections::HashMap,
+    ffi::OsStr,
+    fmt::Write,
+    fs::File,
+    io::{BufRead, BufReader, Read},
+    num::IntErrorKind,
+    path::Path,
+    sync::LazyLock,
+    time::Instant,
 };
 
 use super::{ProcessError, Result};
@@ -9,12 +17,41 @@ use super::{ProcessError, Result};
 #[derive(Debug, Clone)]
 pub struct SystemInfo {
     page_size: usize,
+    pages_avail: usize,
+    clock_tick: u64,
     info: libc::sysinfo,
 }
 
 impl SystemInfo {
     pub fn get() -> &'static Self {
         &SYS_INFO
+    }
+
+    pub fn new() -> Self {
+        unsafe {
+            let mut info = std::mem::zeroed();
+            if libc::sysinfo(&mut info) != 0 {
+                panic!("sysinfo failed: {}", std::io::Error::last_os_error());
+            }
+            let page_size = libc::sysconf(libc::_SC_PAGESIZE)
+                .try_into()
+                .map_err(|_| std::io::Error::last_os_error())
+                .expect("sysconf failed");
+            let pages_avail = libc::sysconf(libc::_SC_AVPHYS_PAGES)
+                .try_into()
+                .map_err(|_| std::io::Error::last_os_error())
+                .expect("sysconf failed");
+            let clock_tick = libc::sysconf(libc::_SC_CLK_TCK)
+                .try_into()
+                .map_err(|_| std::io::Error::last_os_error())
+                .expect("sysconf failed");
+            SystemInfo {
+                page_size,
+                pages_avail,
+                info,
+                clock_tick,
+            }
+        }
     }
 
     pub fn page_size(&self) -> usize {
@@ -27,17 +64,7 @@ impl SystemInfo {
     }
 }
 
-static SYS_INFO: LazyLock<SystemInfo> = LazyLock::new(|| unsafe {
-    let mut info = std::mem::zeroed();
-    if libc::sysinfo(&mut info) != 0 {
-        panic!("sysinfo failed: {}", std::io::Error::last_os_error());
-    }
-    let page_size = libc::sysconf(libc::_SC_PAGESIZE)
-        .try_into()
-        .map_err(|_| std::io::Error::last_os_error())
-        .expect("sysconf failed");
-    SystemInfo { page_size, info }
-});
+static SYS_INFO: LazyLock<SystemInfo> = LazyLock::new(SystemInfo::new);
 
 #[derive(Debug, Clone)]
 pub struct ProcStat {
@@ -56,6 +83,20 @@ impl ProcStat {
 pub struct CompilationProcess<'a> {
     cmdline: &'a str,
     pid: u32,
+}
+
+fn read_meminfo_like<'a>(
+    path: impl AsRef<Path>,
+    buf: &'a mut String,
+) -> Result<HashMap<&'a str, &'a str>> {
+    buf.clear();
+    let mut f = File::open(path.as_ref())?;
+    f.read_to_string(buf)?;
+    Ok(buf
+        .lines()
+        .filter_map(|l| l.split_once(":"))
+        .map(|(k, v)| (k, v.trim()))
+        .collect())
 }
 
 impl<'a> CompilationProcess<'a> {
@@ -81,13 +122,9 @@ impl<'a> CompilationProcess<'a> {
     }
 
     pub fn is_alive(&self, buf: &mut String) -> bool {
-        let Ok(mut f) = File::open(format!("/proc/{}/status", self.pid)) else {
+        let Ok(h) = read_meminfo_like(format!("/proc/{}/status", self.pid), buf) else {
             return false;
         };
-        if f.read_to_string(buf).is_err() {
-            return false;
-        }
-        let h: HashMap<&str, &str> = buf.lines().filter_map(|l| l.split_once(":\t")).collect();
         let state = h["State"].chars().next();
         state != Some('Z')
     }
@@ -168,5 +205,71 @@ impl<'a> CompilationProcess<'a> {
     }
     pub fn cmdline(&self) -> &str {
         self.cmdline
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SystemLoad {
+    prev_load: u64,
+    load_percent: u64,
+    mem_avail: usize,
+    timestamp: Instant,
+    buffer: String,
+}
+
+impl SystemLoad {
+    const CPU_UPDATE_COOLDOWN_MS: u64 = 200;
+    pub fn new() -> Self {
+        let mut seed = Self {
+            prev_load: 0,
+            load_percent: 0,
+            mem_avail: 0,
+            timestamp: Instant::now(),
+            buffer: String::new(),
+        };
+        seed.update();
+        seed
+    }
+    pub fn update(&mut self) {
+        let meminfo = read_meminfo_like("/proc/meminfo", &mut self.buffer)
+            .expect("failed to read /proc/meminfo");
+        self.mem_avail = Self::parse_mem(meminfo["MemAvailable"]) * 1024;
+        let load_ms = self.get_load_time() * 1000 / SYS_INFO.clock_tick;
+        if load_ms != self.prev_load {
+            let now = Instant::now();
+            let passed = now.duration_since(self.timestamp).as_millis() as u64;
+            if passed >= Self::CPU_UPDATE_COOLDOWN_MS && passed > 0 {
+                self.load_percent = (load_ms - self.prev_load) * 100 / passed;
+                self.prev_load = load_ms;
+                self.timestamp = now;
+            }
+        }
+    }
+    pub fn load_percent(&self) -> u64 {
+        self.load_percent
+    }
+    pub fn avail_ram(&self) -> usize {
+        self.mem_avail
+    }
+    fn parse_mem(s: &str) -> usize {
+        s.strip_suffix(" kB")
+            .expect("/proc/meminfo reported invalid value")
+            .parse()
+            .expect("/proc/meminfo reported invalid value")
+    }
+    fn get_load_time(&mut self) -> u64 {
+        self.buffer.clear();
+        let mut f = BufReader::new(File::open("/proc/stat").expect("failed to open /proc/stat"));
+        f.read_line(&mut self.buffer)
+            .expect("failed to read /proc/stat");
+
+        self.buffer
+            .split(' ')
+            .filter(|s| !s.is_empty())
+            .skip(1)
+            .take(3) // utime, nice, stime,
+            .map(str::parse::<u64>)
+            .flatten()
+            .sum()
     }
 }

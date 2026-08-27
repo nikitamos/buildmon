@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::fmt::{Display, Write};
+use std::fmt::{Display, Write, format};
 use std::io::{self};
 use std::ops::DerefMut;
 use std::process::{Child, Command, Stdio};
@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use buildmon::ProcessError;
 use buildmon::component::{Component, ComponentState};
-use buildmon::proc::SystemInfo;
+use buildmon::proc::{SystemInfo, SystemLoad};
 use buildmon::std_streams::{ActiveStream, StdStreamsWidget, StdStreamsWidgetState};
 use buildmon::tree::{EagerTreeNode, LazyRow, Tree, TreeNode, TreeState};
 use buildmon::{
@@ -198,6 +198,7 @@ struct App {
     child: WaitChild,
     alloc: AllocInfo,
     info: &'static SystemInfo,
+    load: SystemLoad,
     output: StdStreamsWidget,
     output_state: ComponentState<StdStreamsWidgetState>,
     tree_state: ComponentState<TreeState>,
@@ -212,6 +213,7 @@ impl App {
             child,
             alloc,
             info: SystemInfo::get(),
+            load: SystemLoad::new(),
             tree_state: ComponentState::<TreeState>::default().focus(true),
         })
     }
@@ -224,6 +226,7 @@ impl App {
             self.handle_events()?;
             self.update();
             term.draw(|f| self.draw(f))?;
+            std::thread::sleep(Duration::from_millis(20));
         }
         self.child.kill()?;
         term.backend_mut().execute(DisableMouseCapture)?;
@@ -239,11 +242,8 @@ impl App {
                 Line::from_iter(["Q".green().bold(), "uit".cyan()])
                     .alignment(HorizontalAlignment::Left),
             )
-            .title_bottom(
-                Line::from(format!("{} RAM", convert_mem_units(self.info.total_ram())))
-                    .alignment(HorizontalAlignment::Right)
-                    .red(),
-            );
+            .title_bottom(self.mem_consumption())
+            .title_bottom(self.cpu_load());
 
         let [tree_area, out_block_area] = Layout::default()
             .direction(Direction::Vertical)
@@ -270,6 +270,29 @@ impl App {
         self.render_tree(tree_area, frame);
     }
 
+    fn mem_consumption(&mut self) -> Line<'static> {
+        let used_ram = self.info.total_ram() - self.load.avail_ram();
+
+        let color = match used_ram * 100 / self.info.total_ram() {
+            ..50 => Color::Green,
+            80.. => Color::Red,
+            _ => Color::Yellow,
+        };
+
+        Line::from(format!(
+            "{}/{} RAM",
+            convert_mem_units(used_ram),
+            convert_mem_units(self.info.total_ram())
+        ))
+        .alignment(HorizontalAlignment::Right)
+        .fg(color)
+    }
+    fn cpu_load(&mut self) -> Line<'static> {
+        Line::from(format!("{}% CPU", self.load.load_percent()))
+            .alignment(HorizontalAlignment::Right)
+            .fg(Color::Magenta)
+    }
+
     pub fn update(&mut self) {
         let (e1, e2) = self.output.update();
         if let Err(e) = e1 {
@@ -278,6 +301,8 @@ impl App {
         if let Err(e) = e2 {
             eprintln!("Failed to read stderr: {e}");
         }
+
+        self.load.update();
     }
 
     fn handle_events(&mut self) -> io::Result<()> {
