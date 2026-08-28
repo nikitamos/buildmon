@@ -40,6 +40,7 @@ pub mod classifier;
 pub mod component;
 pub mod std_streams;
 pub mod tree;
+pub mod units;
 
 pub use proc::CompilationProcess;
 pub use proc::ProcStat;

@@ -70,12 +70,18 @@ static SYS_INFO: LazyLock<SystemInfo> = LazyLock::new(SystemInfo::new);
 pub struct ProcStat {
     /// Resident memory (in pages)
     mem: usize,
+    /// The time the process started after boot, expressed in clock ticks
+    start_time: u64,
 }
 
 impl ProcStat {
     /// Size of resident memory in bytes
     pub fn rss_bytes(&self) -> usize {
         self.mem * SYS_INFO.page_size
+    }
+    /// The time the process started after boot, in milliseconds
+    pub fn start_time(&self) -> u64 {
+        self.start_time * 1000 / SYS_INFO.clock_tick
     }
 }
 
@@ -166,6 +172,7 @@ impl<'a> CompilationProcess<'a> {
         use bumpalo::collections::Vec;
         const UTIME: usize = 13;
         const STIMR: usize = 14;
+        const START_TIME: usize = 21;
         const RSS: usize = 23;
 
         stbuf.clear();
@@ -176,6 +183,9 @@ impl<'a> CompilationProcess<'a> {
 
         Ok(ProcStat {
             mem: stat[RSS]
+                .parse()
+                .expect("/proc/<PID>/stat reported invalid number"),
+            start_time: stat[START_TIME]
                 .parse()
                 .expect("/proc/<PID>/stat reported invalid number"),
         })
@@ -213,6 +223,8 @@ pub struct SystemLoad {
     prev_load: u64,
     load_percent: u64,
     mem_avail: usize,
+    // Time elapsed since system boot, in milliseconds
+    uptime: u64,
     timestamp: Instant,
     buffer: String,
 }
@@ -224,6 +236,7 @@ impl SystemLoad {
             prev_load: 0,
             load_percent: 0,
             mem_avail: 0,
+            uptime: 0,
             timestamp: Instant::now(),
             buffer: String::new(),
         };
@@ -234,6 +247,7 @@ impl SystemLoad {
         let meminfo = read_meminfo_like("/proc/meminfo", &mut self.buffer)
             .expect("failed to read /proc/meminfo");
         self.mem_avail = Self::parse_mem(meminfo["MemAvailable"]) * 1024;
+        self.uptime = self.get_uptime();
         let load_ms = self.get_load_time() * 1000 / SYS_INFO.clock_tick;
         if load_ms != self.prev_load {
             let now = Instant::now();
@@ -250,6 +264,9 @@ impl SystemLoad {
     }
     pub fn avail_ram(&self) -> usize {
         self.mem_avail
+    }
+    pub fn uptime(&self) -> u64 {
+        self.uptime
     }
     fn parse_mem(s: &str) -> usize {
         s.strip_suffix(" kB")
@@ -271,5 +288,21 @@ impl SystemLoad {
             .map(str::parse::<u64>)
             .flatten()
             .sum()
+    }
+    /// Returns time elapsed since system boot, in milliseconds
+    fn get_uptime(&mut self) -> u64 {
+        self.buffer.clear();
+        let mut f = File::open("/proc/uptime").expect("failed to open /proc/uptime");
+        f.read_to_string(&mut self.buffer)
+            .expect("failed to read /proc/stat");
+        dbg!(
+            self.buffer
+                .split_once(' ')
+                .unwrap()
+                .0
+                .parse::<f64>()
+                .unwrap()
+                * 1000.0
+        ) as u64
     }
 }

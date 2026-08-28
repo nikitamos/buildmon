@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::fmt::{Display, Write, format};
+use std::fmt::Write;
 use std::io::{self};
 use std::ops::DerefMut;
 use std::process::{Child, Command, Stdio};
@@ -10,6 +10,7 @@ use buildmon::component::{Component, ComponentState};
 use buildmon::proc::{SystemInfo, SystemLoad};
 use buildmon::std_streams::{ActiveStream, StdStreamsWidget, StdStreamsWidgetState};
 use buildmon::tree::{EagerTreeNode, LazyRow, Tree, TreeNode, TreeState};
+use buildmon::units::{MemUnit, Time};
 use buildmon::{
     CompilationProcess,
     classifier::{ClassifierImpl, ProcessClassifier},
@@ -56,52 +57,14 @@ pub struct ProcessNode<'a> {
     proc: &'a CompilationProcess<'a>,
     alloc: &'a AllocInfo,
     children: &'a [Option<ProcessNode<'a>>],
+    uptime: u64,
     depth: usize,
     height: usize,
     children_count: usize,
 }
 
-#[derive(Copy, Clone, Debug)]
-pub enum MemUnit {
-    B(f64),
-    KiB(f64),
-    MiB(f64),
-    GiB(f64),
-    TiB(f64),
-}
-
-impl Display for MemUnit {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let (val, unit) = match self {
-            MemUnit::B(b) => (b, "b"),
-            MemUnit::KiB(k) => (k, "K"),
-            MemUnit::MiB(m) => (m, "M"),
-            MemUnit::GiB(g) => (g, "G"),
-            MemUnit::TiB(t) => (t, "T"),
-        };
-        write!(f, "{val:.2}{unit}",)
-    }
-}
-
-pub fn convert_mem_units(bytes: usize) -> MemUnit {
-    use MemUnit::*;
-    const KIB: usize = 1024;
-    const MIB: usize = KIB * 1024;
-    const GIB: usize = MIB * 1024;
-    const TIB: usize = GIB * 1024;
-
-    let b = bytes as f64;
-    match bytes {
-        0..KIB => B(b),
-        KIB..MIB => KiB(b / KIB as f64),
-        MIB..GIB => MiB(b / MIB as f64),
-        GIB..TIB => GiB(b / GIB as f64),
-        _ => TiB(b / TIB as f64),
-    }
-}
-
 impl<'a> ProcessNode<'a> {
-    pub fn from_pid_in(pid: u32, alloc: &'a AllocInfo) -> buildmon::Result<Self> {
+    pub fn new(pid: u32, uptime: u64, alloc: &'a AllocInfo) -> buildmon::Result<Self> {
         use bumpalo::collections::Vec;
         let proc = CompilationProcess::from_pid_in(pid, &alloc.procs)?;
         let children = Vec::from_iter_in(
@@ -109,7 +72,7 @@ impl<'a> ProcessNode<'a> {
             &alloc.arena,
         );
         let children = alloc.procs.alloc_slice_fill_with(children.len(), |i| {
-            ProcessNode::from_pid_in(children[i] as u32, alloc).ok()
+            ProcessNode::new(children[i] as u32, uptime, alloc).ok()
         });
         let (depth, height, count) = children.iter().fold((0, 0, 0), |(d, h, count), c| {
             if let Some(c) = c {
@@ -122,6 +85,7 @@ impl<'a> ProcessNode<'a> {
             proc,
             alloc,
             children,
+            uptime,
             depth: depth + 1, // TODO: is 1 here necessary?
             height: height + 1,
             children_count: count,
@@ -133,20 +97,24 @@ impl<'a> TreeNode for ProcessNode<'a> {
     fn row<'s>(&'s self) -> LazyRow<'s, impl Iterator<Item = Span<'s>>> {
         let class = ClassifierImpl.classify(self.proc);
         let buf = &mut self.alloc.str_buf();
-        let mem = match self.proc.stat(&self.alloc.procs, buf) {
+        let (mem, time) = match self.proc.stat(&self.alloc.procs, buf) {
             Ok(stat) => {
                 buf.clear();
-                let _ = write!(buf, "{}", convert_mem_units(stat.rss_bytes()));
-                self.alloc.procs.alloc_str(buf)
+                let _ = write!(buf, "{}", MemUnit::from_bytes(stat.rss_bytes()));
+                let mem = self.alloc.procs.alloc_str(buf);
+                buf.clear();
+                let _ = write!(buf, "{}",Time::from_ms(self.uptime.saturating_sub(stat.start_time())));
+                let time = self.alloc.procs.alloc_str(buf);
+                (mem as &str, time as &str)
             }
-            Err(_) => "ERR",
+            Err(_) => ("ERR", "ERR"),
         };
         LazyRow::new([
             class.tool.short_repr().green().bold(),
             Span::from(self.proc.executable_basename().unwrap_or_default()),
             Span::from(class.artifact.unwrap_or("UNKNOWN")),
             Span::from(mem),
-            Span::from("TODO"),
+            Span::from(time),
         ])
     }
 
@@ -281,8 +249,8 @@ impl App {
 
         Line::from(format!(
             "{}/{} RAM",
-            convert_mem_units(used_ram),
-            convert_mem_units(self.info.total_ram())
+            MemUnit::from_bytes(used_ram),
+            MemUnit::from_bytes(self.info.total_ram())
         ))
         .alignment(HorizontalAlignment::Right)
         .fg(color)
@@ -378,10 +346,10 @@ impl App {
     }
 
     fn render_tree(&mut self, area: Rect, frame: &mut Frame) {
-        let Ok(root) = ProcessNode::from_pid_in(self.child.id(), &self.alloc) else {
+        let Ok(root) = ProcessNode::new(self.child.id(), self.load.uptime(), &self.alloc) else {
             return;
         };
-        let tree = Tree::new(root, vec![5, 15, 20, 8, 5]).max_depth(16).block(
+        let tree = Tree::new(root, vec![5, 15, 20, 8, 10]).max_depth(16).block(
             widgets::Block::bordered()
                 .border_set(Self::border_set(self.tree_state.focus))
                 .title("Processes".blue().underlined()),
