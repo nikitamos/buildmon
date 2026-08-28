@@ -103,7 +103,11 @@ impl<'a> TreeNode for ProcessNode<'a> {
                 let _ = write!(buf, "{}", MemUnit::from_bytes(stat.rss_bytes()));
                 let mem = self.alloc.procs.alloc_str(buf);
                 buf.clear();
-                let _ = write!(buf, "{}",Time::from_ms(self.uptime.saturating_sub(stat.start_time())));
+                let _ = write!(
+                    buf,
+                    "{}",
+                    Time::from_ms(self.uptime.saturating_sub(stat.start_time()))
+                );
                 let time = self.alloc.procs.alloc_str(buf);
                 (mem as &str, time as &str)
             }
@@ -349,11 +353,17 @@ impl App {
         let Ok(root) = ProcessNode::new(self.child.id(), self.load.uptime(), &self.alloc) else {
             return;
         };
-        let tree = Tree::new(root, vec![5, 15, 20, 8, 10]).max_depth(16).block(
-            widgets::Block::bordered()
-                .border_set(Self::border_set(self.tree_state.focus))
-                .title("Processes".blue().underlined()),
-        );
+        let tree = Tree::new(root, vec![5, 15, 20, 8, 10])
+            .max_depth(16)
+            .block(
+                widgets::Block::bordered()
+                    .border_set(Self::border_set(self.tree_state.focus))
+                    .title("Processes".blue().underlined()),
+            )
+            .scrollbar(
+                Scrollbar::new(widgets::ScrollbarOrientation::VerticalRight)
+                    .track_symbol(Some(symbols::border::THICK.vertical_right)),
+            );
         frame.render_stateful_widget(Component(&tree), area, &mut self.tree_state);
     }
     fn focus_next(&mut self) {

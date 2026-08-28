@@ -311,15 +311,16 @@ impl<'a, S: TreeNode> Tree<'a, S> {
         buf: &mut Buffer,
         scroll_state: &mut ScrollbarState,
     ) -> Rect {
-        if let Some(ref scrollbar) = self.scrollbar {
-            scrollbar.clone().render(area, buf, scroll_state);
-        }
-        if let Some(ref block) = self.block {
+        let inner_area = if let Some(ref block) = self.block {
             block.render(area, buf);
             block.inner(area)
         } else {
             area
+        };
+        if let Some(ref scrollbar) = self.scrollbar {
+            scrollbar.clone().render(area, buf, scroll_state);
         }
+        inner_area
     }
 }
 
