@@ -165,12 +165,6 @@ impl TreeInner {
         ctx: &NodeRenderContext,
     ) -> u16 {
         if node_height >= ctx.area.height + ctx.scroll {
-            eprintln!(
-                "rejected: {:?}, h={node_height}, scroll={}, area={:?}",
-                node.row().iter().next().unwrap(),
-                ctx.scroll,
-                ctx.area
-            );
             return node_height;
         }
 
@@ -305,6 +299,11 @@ impl<'a, S: TreeNode> Tree<'a, S> {
     }
 
     #[must_use]
+    pub fn take_root(self) -> S {
+        self.root
+    }
+
+    #[must_use]
     fn render_frame(
         &self,
         area: Rect,
@@ -318,7 +317,9 @@ impl<'a, S: TreeNode> Tree<'a, S> {
             area
         };
         if let Some(ref scrollbar) = self.scrollbar {
-            scrollbar.clone().render(area.inner(Margin::new(0, 1)), buf, scroll_state);
+            scrollbar
+                .clone()
+                .render(area.inner(Margin::new(0, 1)), buf, scroll_state);
         }
         inner_area
     }

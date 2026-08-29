@@ -6,11 +6,25 @@ use crate::classifier::Tool::Heresy;
 
 use super::*;
 
-pub enum ProcessKind {
+#[derive(Debug, Clone)]
+pub enum ToolCategory {
     Compiler,
     Linker,
-    Tool,
+    Other,
     Build,
+}
+
+impl ToolCategory {
+    pub fn of_tool(tool: &Tool) -> Self {
+        match tool {
+            Tool::CC | Tool::CXX | Tool::Rust | Tool::Zig | Tool::Asm => ToolCategory::Compiler,
+            Tool::Linker => ToolCategory::Linker,
+            Tool::CMake | Tool::Ninja | Tool::Make | Tool::Cargo | Tool::ZigBuild => {
+                ToolCategory::Build
+            }
+            Tool::Shell | Heresy(_) => ToolCategory::Other,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -80,44 +94,37 @@ pub struct ProcessClassification<'proc> {
     pub artifact: Option<&'proc str>,
 }
 
-pub trait ProcessClassifier {
-    fn classify<'proc>(&self, proc: &'proc CompilationProcess) -> ProcessClassification<'proc>;
-}
-pub struct ClassifierImpl;
+pub fn classify_tool<'p>(proc: &'p CompilationProcess) -> ProcessClassification<'p> {
+    let basename = proc.executable_basename().unwrap_or_default();
+    let tool = match basename.as_ref() {
+        "clang++" | "g++" | "c++" | "cc1plus" => Tool::CXX, // TODO:
+        "clang" | "gcc" | "cc" => Tool::CC,
+        "rustc" => Tool::Rust,
+        "zig" => Tool::Zig,
+        "cmake" => Tool::CMake,
+        "ninja" => Tool::Ninja,
+        "make" => Tool::Make,
+        "cargo" => Tool::Cargo,
+        "sh" | "bash" | "csh" | "zsh" | "fish" => Tool::Shell,
+        "ld" | "lld" | "ld.lld" | "mold" | "gold" | "collect2" | "rust-lld" => Tool::Linker,
+        "as" | "llvm-as" => Tool::Asm,
+        _ => Heresy(basename),
+    };
 
-impl ProcessClassifier for ClassifierImpl {
-    fn classify<'proc>(&self, proc: &'proc CompilationProcess) -> ProcessClassification<'proc> {
-        let basename = proc.executable_basename().unwrap_or_default();
-        let tool = match basename.as_ref() {
-            "clang++" | "g++" | "c++" | "cc1plus" => Tool::CXX, // TODO:
-            "clang" | "gcc" | "cc" => Tool::CC,
-            "rustc" => Tool::Rust,
-            "zig" => Tool::Zig,
-            "cmake" => Tool::CMake,
-            "ninja" => Tool::Ninja,
-            "make" => Tool::Make,
-            "cargo" => Tool::Cargo,
-            "sh" | "bash" | "csh" | "zsh" | "fish" => Tool::Shell,
-            "ld" | "lld" | "ld.lld" | "mold" | "gold" | "collect2" | "rust-lld" => Tool::Linker,
-            "as" | "llvm-as" => Tool::Asm,
-            _ => Heresy(basename),
-        };
-
-        // For now we will assume, that path to the output artifact
-        // is given after -o, as it is a rather common convention
-        let mut iter = proc.args();
-        let artifact = loop {
-            if let Some(arg) = iter.next() {
-                if arg == "-o" {
-                    break iter
-                        .next()
-                        .and_then(|p| Path::new(p).file_name().map(|s| s.to_str().unwrap_or(p)));
-                }
-            } else {
-                break None;
+    // For now we will assume, that path to the output artifact
+    // is given after -o, as it is a rather common convention
+    let mut iter = proc.args();
+    let artifact = loop {
+        if let Some(arg) = iter.next() {
+            if arg == "-o" {
+                break iter
+                    .next()
+                    .and_then(|p| Path::new(p).file_name().map(|s| s.to_str().unwrap_or(p)));
             }
-        };
+        } else {
+            break None;
+        }
+    };
 
-        ProcessClassification { tool, artifact }
-    }
+    ProcessClassification { tool, artifact }
 }

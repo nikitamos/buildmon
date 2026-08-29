@@ -291,7 +291,7 @@ impl SystemLoad {
         let mut f = File::open("/proc/uptime").expect("failed to open /proc/uptime");
         f.read_to_string(&mut self.buffer)
             .expect("failed to read /proc/stat");
-        dbg!(
+        (
             self.buffer
                 .split_once(' ')
                 .unwrap()

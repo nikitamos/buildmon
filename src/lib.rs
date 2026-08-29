@@ -1,10 +1,6 @@
 #![allow(dead_code)]
 
-use std::{
-    borrow::Cow,
-    path::Path,
-};
-
+use std::{borrow::Cow, path::Path};
 
 #[inline(always)]
 pub(crate) fn minmax<T: Ord>(a: T, b: T) -> (T, T) {
@@ -36,13 +32,13 @@ impl std::error::Error for ProcessError {}
 
 pub type Result<T, E = ProcessError> = std::result::Result<T, E>;
 
+pub mod chart;
 pub mod classifier;
 pub mod component;
+pub mod proc;
 pub mod std_streams;
 pub mod tree;
 pub mod units;
 
 pub use proc::CompilationProcess;
 pub use proc::ProcStat;
-
-pub mod proc;
