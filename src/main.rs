@@ -72,7 +72,7 @@ impl<'a> ProcessNode<'a> {
             &alloc.arena,
         );
         let children = alloc.procs.alloc_slice_fill_with(children.len(), |i| {
-            ProcessNode::new(children[i] as u32, uptime, alloc).ok()
+            ProcessNode::new(children[i], uptime, alloc).ok()
         });
         let (depth, height, count) = children.iter().fold((0, 0, 0), |(d, h, count), c| {
             if let Some(c) = c {
@@ -237,7 +237,7 @@ impl App {
         frame.render_stateful_widget(
             output_scrollbar,
             out_block_area.inner(Margin::new(0, 1)),
-            &mut self.output_state.vertical_scrollbar(),
+            self.output_state.vertical_scrollbar(),
         );
         self.render_tree(tree_area, frame);
     }

@@ -185,9 +185,9 @@ impl TreeInner {
         let mut prev_height = height;
 
         for c in node.children() {
-            self.connect_siblings(depth + 1, prev_height, height, buf, &ctx);
+            self.connect_siblings(depth + 1, prev_height, height, buf, ctx);
             prev_height = height;
-            height = self.render_node(c, buf, depth + 1, height, &ctx);
+            height = self.render_node(c, buf, depth + 1, height, ctx);
         }
 
         // Replace bridge if node has children.
@@ -251,7 +251,7 @@ impl TreeInner {
         style: Style,
         max_width: usize,
     ) {
-        buf.set_stringn(x, y, string, max_width, style).0;
+        buf.set_stringn(x, y, string, max_width, style);
         // TODO: proper width counting
         let width = string.chars().count();
         if max_width < width {

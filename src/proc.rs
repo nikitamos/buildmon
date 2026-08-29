@@ -91,10 +91,7 @@ pub struct CompilationProcess<'a> {
     pid: u32,
 }
 
-fn read_meminfo_like<'a>(
-    path: impl AsRef<Path>,
-    buf: &'a mut String,
-) -> Result<HashMap<&'a str, &'a str>> {
+fn read_meminfo_like(path: impl AsRef<Path>, buf: &mut String) -> Result<HashMap<&str, &str>> {
     buf.clear();
     let mut f = File::open(path.as_ref())?;
     f.read_to_string(buf)?;
@@ -285,8 +282,7 @@ impl SystemLoad {
             .filter(|s| !s.is_empty())
             .skip(1)
             .take(3) // utime, nice, stime,
-            .map(str::parse::<u64>)
-            .flatten()
+            .flat_map(str::parse::<u64>)
             .sum()
     }
     /// Returns time elapsed since system boot, in milliseconds

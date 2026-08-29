@@ -1,4 +1,4 @@
-use std::fmt::{Display, write};
+use std::fmt::Display;
 
 #[derive(Copy, Clone, Debug)]
 pub enum MemUnit {
@@ -66,7 +66,7 @@ impl Time {
             s: (s % 60) as u16,
             m: (m % 60) as u16,
             h: (h % 24) as u16,
-            d: d,
+            d,
         }
     }
 }
