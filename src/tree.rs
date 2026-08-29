@@ -318,7 +318,7 @@ impl<'a, S: TreeNode> Tree<'a, S> {
             area
         };
         if let Some(ref scrollbar) = self.scrollbar {
-            scrollbar.clone().render(area, buf, scroll_state);
+            scrollbar.clone().render(area.inner(Margin::new(0, 1)), buf, scroll_state);
         }
         inner_area
     }

@@ -18,10 +18,10 @@ use buildmon::{
 use bumpalo::Bump;
 use crossterm::ExecutableCommand;
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
-    MouseEvent, MouseEventKind,
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+    KeyEventState, KeyModifiers, MouseEvent, MouseEventKind,
 };
-use ratatui::widgets::{self, Scrollbar};
+use ratatui::widgets::{self, ScrollDirection, Scrollbar};
 use ratatui::{DefaultTerminal, Frame, prelude::*};
 
 #[derive(Debug)]
@@ -282,23 +282,7 @@ impl App {
             return Ok(());
         }
         match event::read()? {
-            Event::Key(KeyEvent {
-                code: KeyCode::Char('q'),
-                ..
-            }) => self.exit = true,
-            Event::Key(KeyEvent {
-                code: KeyCode::Char('s'),
-                ..
-            }) => {
-                self.output_state.switch();
-            }
-            Event::Key(KeyEvent {
-                code: KeyCode::Tab, ..
-            }) => self.focus_next(),
-            Event::Key(KeyEvent {
-                code: KeyCode::BackTab,
-                ..
-            }) => self.focus_prev(),
+            Event::Key(ke) => self.handle_key_event(ke.code, ke.modifiers, ke.kind, ke.state)?,
             Event::Mouse(MouseEvent {
                 column,
                 row,
@@ -329,6 +313,34 @@ impl App {
                 scroll_state.prev();
             }
             _ => (),
+        }
+    }
+    fn handle_key_event(
+        &mut self,
+        code: KeyCode,
+        _modifiers: KeyModifiers,
+        _kind: KeyEventKind,
+        _state: KeyEventState,
+    ) -> io::Result<()> {
+        match code {
+            KeyCode::Char('q') => self.exit = true,
+            KeyCode::Char('s') => self.output_state.switch(),
+            KeyCode::Tab => self.focus_next(),
+            KeyCode::BackTab => self.focus_prev(),
+
+            KeyCode::Up | KeyCode::Char('k') => self.scroll_current(ScrollDirection::Backward),
+            KeyCode::Down | KeyCode::Char('j') => self.scroll_current(ScrollDirection::Forward),
+            _ => (),
+        }
+        Ok(())
+    }
+
+    fn scroll_current(&mut self, direction: ScrollDirection) {
+        if self.tree_state.focus {
+            self.tree_state.scroll.scroll(direction);
+        }
+        if self.output_state.focus {
+            self.output_state.vertical_scroll(direction, 1);
         }
     }
 
