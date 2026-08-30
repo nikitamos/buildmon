@@ -3,14 +3,13 @@ use std::cell::RefCell;
 use std::default::Default;
 use std::fmt::Write;
 use std::io::{self};
-use std::iter::Sum;
-use std::ops::{Add, DerefMut};
+use std::ops::DerefMut;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::Duration;
 
 use buildmon::chart::{MemChartDataset, MemUsageByCategory};
-use buildmon::classifier::{self, Tool, ToolCategory};
+use buildmon::classifier::{self};
 use buildmon::component::{Component, ComponentState};
 use buildmon::proc::{SystemInfo, SystemLoad};
 use buildmon::std_streams::{ActiveStream, StdStreamsWidget, StdStreamsWidgetState};
@@ -21,13 +20,10 @@ use buildmon::{ProcStat, ProcessError};
 use bumpalo::Bump;
 use crossterm::ExecutableCommand;
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
-    KeyEventState, KeyModifiers, MouseEvent, MouseEventKind,
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyEventState,
+    KeyModifiers, MouseEvent, MouseEventKind,
 };
-use libc::stat;
-use ratatui::widgets::{
-    self, Axis, Block, Chart, Dataset, Paragraph, ScrollDirection, Scrollbar, Shadow,
-};
+use ratatui::widgets::{self, Axis, Block, Chart, Dataset, Paragraph, ScrollDirection, Scrollbar};
 use ratatui::{DefaultTerminal, Frame, prelude::*};
 
 #[derive(Debug)]
@@ -203,7 +199,7 @@ struct App<'a> {
     child_cmdline: &'a str,
 }
 
-const VERSION_HEADER: &'static str =
+const VERSION_HEADER: &str =
     concat!(env!("CARGO_BIN_NAME"), " v", env!("CARGO_PKG_VERSION"));
 
 impl<'a> App<'a> {
@@ -248,7 +244,7 @@ impl<'a> App<'a> {
     }
 
     fn kill_child(&mut self) -> std::io::Result<()> {
-        let code = unsafe { libc::kill(self.child.id() as i32 * -1, libc::SIGKILL) };
+        let code = unsafe { libc::kill(-(self.child.id() as i32), libc::SIGKILL) };
         if code != 0 {
             Err(io::Error::last_os_error())
         } else {
@@ -557,7 +553,7 @@ impl<'a> App<'a> {
 fn main() -> Result<(), std::io::Error> {
     let args: Vec<_> = std::env::args().collect();
     let c = WaitChild(
-        Command::new(&args.get(1).expect("Program to start expected"))
+        Command::new(args.get(1).expect("Program to start expected"))
             .args(args.get(2..).unwrap_or_default())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

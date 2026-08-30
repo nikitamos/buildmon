@@ -64,6 +64,12 @@ impl SystemInfo {
     }
 }
 
+impl Default for SystemInfo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 static SYS_INFO: LazyLock<SystemInfo> = LazyLock::new(SystemInfo::new);
 
 #[derive(Debug, Clone)]
@@ -300,5 +306,11 @@ impl SystemLoad {
                 .unwrap()
                 * 1000.0
         ) as u64
+    }
+}
+
+impl Default for SystemLoad {
+    fn default() -> Self {
+        Self::new()
     }
 }

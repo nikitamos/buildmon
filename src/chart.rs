@@ -1,4 +1,4 @@
-use std::{char::MAX, iter::Sum, ops::Add};
+use std::{iter::Sum, ops::Add};
 
 use crate::{
     classifier::{Tool, ToolCategory},
@@ -114,14 +114,14 @@ impl MemChartDataset {
     /// 3. `build`
     /// 4. `other`
     #[inline(always)]
-    fn for_each<T>(&mut self, args: [T; DATA_ROW_COUNT], mut f: impl FnMut(&mut DataRow, T) -> ()) {
+    fn for_each<T>(&mut self, args: [T; DATA_ROW_COUNT], mut f: impl FnMut(&mut DataRow, T)) {
         let rows = [
             &mut self.link,
             &mut self.compile,
             &mut self.build,
             &mut self.other,
         ];
-        for (s, arg) in rows.into_iter().zip(args.into_iter()) {
+        for (s, arg) in rows.into_iter().zip(args) {
             f(s, arg);
         }
     }
