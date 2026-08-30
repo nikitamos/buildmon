@@ -199,8 +199,7 @@ struct App<'a> {
     child_cmdline: &'a str,
 }
 
-const VERSION_HEADER: &str =
-    concat!(env!("CARGO_BIN_NAME"), " v", env!("CARGO_PKG_VERSION"));
+const VERSION_HEADER: &str = concat!(env!("CARGO_BIN_NAME"), " v", env!("CARGO_PKG_VERSION"));
 
 impl<'a> App<'a> {
     pub fn new(
@@ -219,7 +218,7 @@ impl<'a> App<'a> {
             load: SystemLoad::new(),
             tree_state: ComponentState::<TreeState>::default().focus(true),
             finish_state: None,
-            child_cmdline
+            child_cmdline,
         })
     }
 
@@ -254,7 +253,13 @@ impl<'a> App<'a> {
 
     pub fn draw(&mut self, frame: &mut Frame) -> UpdateData {
         let root_block = widgets::Block::bordered()
-            .title(VERSION_HEADER.gray().bold().italic().into_right_aligned_line())
+            .title(
+                VERSION_HEADER
+                    .gray()
+                    .bold()
+                    .italic()
+                    .into_right_aligned_line(),
+            )
             .title(self.child_cmdline.bold().into_left_aligned_line())
             .border_set(symbols::border::DOUBLE)
             .title_bottom(
@@ -552,6 +557,34 @@ impl<'a> App<'a> {
 
 fn main() -> Result<(), std::io::Error> {
     let args: Vec<_> = std::env::args().collect();
+
+    match args.get(1).map_or("--help", |x| x.as_str()) {
+        "--license" => {
+            println!("{VERSION_HEADER}");
+            for _ in 0..VERSION_HEADER.len() {
+                print!("=");
+            }
+            println!(
+                "\n{}\n",
+                include_str!("../LICENSE"),
+            );
+            std::process::exit(0);
+        }
+        "--help" => {
+            println!("{VERSION_HEADER} - {}", env!("CARGO_PKG_DESCRIPTION"));
+            println!("Print this message            >> {} --help", args[0]);
+            println!("Print license                 >> {} --license", args[0]);
+            println!("Run command under the monitor >> {} <command>", args[0]);
+            println!(
+                " Example                      >> {} ninja -C build -j6",
+                args[0]
+            );
+
+            std::process::exit(0);
+        }
+        _ => {}
+    }
+
     let c = WaitChild(
         Command::new(args.get(1).expect("Program to start expected"))
             .args(args.get(2..).unwrap_or_default())
