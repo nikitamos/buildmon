@@ -189,7 +189,7 @@ struct UpdateData {
 }
 
 // #[derive(Debug)]
-struct App {
+struct App<'a> {
     exit: bool,
     child: WaitChild,
     alloc: AllocInfo,
@@ -200,10 +200,18 @@ struct App {
     output_state: ComponentState<StdStreamsWidgetState>,
     tree_state: ComponentState<TreeState>,
     finish_state: Option<ExitStatus>,
+    child_cmdline: &'a str,
 }
 
-impl App {
-    pub fn new(mut child: WaitChild, alloc: AllocInfo) -> Result<Self, ProcessError> {
+const VERSION_HEADER: &'static str =
+    concat!(env!("CARGO_BIN_NAME"), " v", env!("CARGO_PKG_VERSION"));
+
+impl<'a> App<'a> {
+    pub fn new(
+        mut child: WaitChild,
+        alloc: AllocInfo,
+        child_cmdline: &'a str,
+    ) -> Result<Self, ProcessError> {
         Ok(Self {
             output: StdStreamsWidget::new(&mut child),
             output_state: Default::default(),
@@ -215,6 +223,7 @@ impl App {
             load: SystemLoad::new(),
             tree_state: ComponentState::<TreeState>::default().focus(true),
             finish_state: None,
+            child_cmdline
         })
     }
 
@@ -249,9 +258,9 @@ impl App {
 
     pub fn draw(&mut self, frame: &mut Frame) -> UpdateData {
         let root_block = widgets::Block::bordered()
-            .title("Build status".italic().yellow().bold())
+            .title(VERSION_HEADER.gray().bold().italic().into_right_aligned_line())
+            .title(self.child_cmdline.bold().into_left_aligned_line())
             .border_set(symbols::border::DOUBLE)
-            .title_alignment(HorizontalAlignment::Left)
             .title_bottom(
                 Line::from_iter(["Q".green().bold(), "uit".cyan()])
                     .alignment(HorizontalAlignment::Left),
@@ -546,10 +555,10 @@ impl App {
 }
 
 fn main() -> Result<(), std::io::Error> {
-    let mut args = std::env::args();
+    let args: Vec<_> = std::env::args().collect();
     let c = WaitChild(
-        Command::new(args.nth(1).expect("Program to start expected"))
-            .args(args)
+        Command::new(&args.get(1).expect("Program to start expected"))
+            .args(args.get(2..).unwrap_or_default())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .process_group(0)
@@ -557,5 +566,7 @@ fn main() -> Result<(), std::io::Error> {
             .unwrap(),
     );
 
-    ratatui::run(move |terminal| (App::new(c, AllocInfo::new()).unwrap()).run(terminal))
+    ratatui::run(move |terminal| {
+        (App::new(c, AllocInfo::new(), &args[1..].join(" ")).unwrap()).run(terminal)
+    })
 }
