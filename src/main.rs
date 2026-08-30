@@ -1,10 +1,12 @@
+use core::fmt::NumBuffer;
 use std::cell::RefCell;
 use std::default::Default;
 use std::fmt::Write;
 use std::io::{self};
 use std::iter::Sum;
 use std::ops::{Add, DerefMut};
-use std::process::{Child, Command, Stdio};
+use std::os::unix::process::{CommandExt, ExitStatusExt};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::Duration;
 
 use buildmon::chart::{MemChartDataset, MemUsageByCategory};
@@ -23,7 +25,9 @@ use crossterm::event::{
     KeyEventState, KeyModifiers, MouseEvent, MouseEventKind,
 };
 use libc::stat;
-use ratatui::widgets::{self, Axis, Block, Chart, Dataset, ScrollDirection, Scrollbar, Shadow};
+use ratatui::widgets::{
+    self, Axis, Block, Chart, Dataset, Paragraph, ScrollDirection, Scrollbar, Shadow,
+};
 use ratatui::{DefaultTerminal, Frame, prelude::*};
 
 #[derive(Debug)]
@@ -195,6 +199,7 @@ struct App {
     output: StdStreamsWidget,
     output_state: ComponentState<StdStreamsWidgetState>,
     tree_state: ComponentState<TreeState>,
+    finish_state: Option<ExitStatus>,
 }
 
 impl App {
@@ -209,6 +214,7 @@ impl App {
             info: SystemInfo::get(),
             load: SystemLoad::new(),
             tree_state: ComponentState::<TreeState>::default().focus(true),
+            finish_state: None,
         })
     }
 
@@ -223,9 +229,22 @@ impl App {
             self.update(&mut updates);
             std::thread::sleep(Duration::from_millis(20));
         }
-        self.child.kill()?;
+        if self.finish_state.is_none() {
+            let _ = self
+                .kill_child()
+                .inspect_err(|e| eprintln!("failed to kill child: {e}"));
+        }
         term.backend_mut().execute(DisableMouseCapture)?;
         Ok(())
+    }
+
+    fn kill_child(&mut self) -> std::io::Result<()> {
+        let code = unsafe { libc::kill(self.child.id() as i32 * -1, libc::SIGKILL) };
+        if code != 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
     }
 
     pub fn draw(&mut self, frame: &mut Frame) -> UpdateData {
@@ -242,7 +261,10 @@ impl App {
 
         let [v_area, chart_area] = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Fill(3), Constraint::Length(chart::MAX_POINTS as u16 + 10)])
+            .constraints([
+                Constraint::Fill(3),
+                Constraint::Length(chart::MAX_POINTS as u16 + 10),
+            ])
             .areas(root_block.inner(frame.area()));
 
         let [tree_area, out_block_area] = Layout::default()
@@ -267,19 +289,48 @@ impl App {
             out_block_area.inner(Margin::new(0, 1)),
             self.output_state.vertical_scrollbar(),
         );
-        let Some((root, tree_state)) = self.render_tree(tree_area, frame) else {
-            return UpdateData::default();
-        };
-        self.render_chart(frame, chart_area);
-        UpdateData {
-            mem_usage: Some(root.get_mem_usage()),
-            tree_state,
+
+        let mut update_data = Default::default();
+        if let Some(ref status) = self.finish_state {
+            self.render_finish_message(frame, tree_area, status);
+        } else {
+            let Some((root, tree_state)) = self.render_tree(tree_area, frame) else {
+                return UpdateData::default();
+            };
+            update_data = UpdateData {
+                mem_usage: Some(root.get_mem_usage()),
+                tree_state,
+            };
         }
+        self.render_chart(frame, chart_area);
+        update_data
+    }
+
+    fn render_finish_message(&self, frame: &mut Frame<'_>, tree_area: Rect, status: &ExitStatus) {
+        let mut line = Line::default();
+        let mut buf = NumBuffer::new();
+        if let Some(code) = status.code() {
+            line.push_span("Process finished with exit code ".italic());
+            let code = code.format_into(&mut buf).italic();
+            if status.success() {
+                line.push_span(code.green().italic().underlined());
+            } else {
+                line.push_span(code.red().italic().underlined());
+            }
+        } else if let Some(signal) = status.signal() {
+            line.push_span("Process terminated by signal ".italic());
+            line.push_span(signal.format_into(&mut buf).yellow().italic().underlined());
+        }
+
+        frame.render_widget(
+            Paragraph::new(Text::from(line).alignment(HorizontalAlignment::Center))
+                .block(Block::bordered().border_set(Self::border_set(self.tree_state.focus))),
+            tree_area,
+        );
     }
 
     fn render_chart(&self, frame: &mut Frame, area: Rect) {
-        let x_axis = Axis::default()
-            .bounds(self.chart_dataset.x_bounds());
+        let x_axis = Axis::default().bounds(self.chart_dataset.x_bounds());
         let y_axis = Axis::default()
             .title("RAM")
             .labels(["0%", "50%", "100%"])
@@ -354,9 +405,12 @@ impl App {
         if let Some(usage) = updates.mem_usage.take() {
             self.chart_dataset
                 .add_point(usage, self.load.uptime() as f64);
-            dbg!(self.chart_dataset.compile());
         }
         self.tree_state = updates.tree_state.clone();
+
+        if let Ok(status) = self.child.try_wait() {
+            self.finish_state = status;
+        }
     }
 
     fn handle_events(&mut self) -> io::Result<()> {
@@ -498,6 +552,7 @@ fn main() -> Result<(), std::io::Error> {
             .args(args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .process_group(0)
             .spawn()
             .unwrap(),
     );
