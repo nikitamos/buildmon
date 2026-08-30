@@ -177,15 +177,17 @@ impl TreeInner {
         let mut height = node_height;
         height += 1;
         let mut prev_height = height;
+        let mut has_children = false;
 
         for c in node.children() {
+            has_children = true;
             self.connect_siblings(depth + 1, prev_height, height, buf, ctx);
             prev_height = height;
             height = self.render_node(c, buf, depth + 1, height, ctx);
         }
 
         // Replace bridge if node has children.
-        if height != prev_height && visible {
+        if has_children && visible {
             let replacement = if node_height == 0 {
                 self.branch.top_left
             } else {
