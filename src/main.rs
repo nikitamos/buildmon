@@ -5,7 +5,7 @@ use std::fmt::Write;
 use std::io::{self};
 use std::ops::DerefMut;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Child, Command, ExitCode, ExitStatus, Stdio};
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -226,7 +226,7 @@ impl<'a> App<'a> {
         })
     }
 
-    pub fn run(&mut self, term: &mut DefaultTerminal) -> io::Result<()> {
+    pub fn run(&mut self, term: &mut DefaultTerminal) -> io::Result<ExitCode> {
         term.backend_mut().execute(EnableMouseCapture)?;
         let mut updates = UpdateData::default();
         while !self.exit {
@@ -241,13 +241,19 @@ impl<'a> App<'a> {
             }
             std::thread::sleep(Duration::from_millis(20));
         }
-        if self.finish_state.is_none() {
+        let exit_code = if let Some(status) = self.finish_state {
+            status
+                .code()
+                .map(|x| ExitCode::from((x & 0xFF) as u32 as u8))
+                .unwrap_or(ExitCode::FAILURE)
+        } else {
             let _ = self
                 .kill_child()
                 .inspect_err(|e| eprintln!("failed to kill child: {e}"));
-        }
+            ExitCode::FAILURE
+        };
         term.backend_mut().execute(DisableMouseCapture)?;
-        Ok(())
+        Ok(exit_code)
     }
 
     fn draw_insufficient_size(&mut self, frame: &mut Frame) {
@@ -575,7 +581,7 @@ impl<'a> App<'a> {
     }
 }
 
-fn main() -> Result<(), std::io::Error> {
+fn main() -> Result<ExitCode, std::io::Error> {
     let args: Vec<_> = std::env::args().collect();
 
     match args.get(1).map_or("--help", |x| x.as_str()) {
@@ -585,7 +591,7 @@ fn main() -> Result<(), std::io::Error> {
                 print!("=");
             }
             println!("\n{}\n", include_str!("../LICENSE"),);
-            std::process::exit(0);
+            return Ok(ExitCode::SUCCESS);
         }
         "--help" => {
             println!("{VERSION_HEADER} - {}", env!("CARGO_PKG_DESCRIPTION"));
@@ -597,7 +603,7 @@ fn main() -> Result<(), std::io::Error> {
                 args[0]
             );
 
-            std::process::exit(0);
+            return Ok(ExitCode::SUCCESS);
         }
         _ => {}
     }
