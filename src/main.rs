@@ -1,11 +1,12 @@
 use core::fmt::NumBuffer;
-use std::cell::RefCell;
+use std::cell::{LazyCell, OnceCell, RefCell};
 use std::default::Default;
 use std::fmt::Write;
 use std::io::{self};
 use std::ops::DerefMut;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use buildmon::chart::{MemChartDataset, MemUsageByCategory};
@@ -23,6 +24,7 @@ use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyEventState,
     KeyModifiers, MouseEvent, MouseEventKind,
 };
+use ratatui::text::ToText;
 use ratatui::widgets::{self, Axis, Block, Chart, Dataset, Paragraph, ScrollDirection, Scrollbar};
 use ratatui::{DefaultTerminal, Frame, prelude::*};
 
@@ -130,7 +132,7 @@ impl<'a> TreeNode for ProcessNode<'a> {
         LazyRow::new([
             class.tool.short_repr().green().bold(),
             Span::from(self.proc.executable_basename().unwrap_or_default()),
-            Span::from(class.artifact.unwrap_or("UNKNOWN")),
+            Span::from(class.artifact.unwrap_or("")),
             Span::from(mem),
             Span::from(time),
         ])
@@ -200,6 +202,8 @@ struct App<'a> {
 }
 
 const VERSION_HEADER: &str = concat!(env!("CARGO_BIN_NAME"), " v", env!("CARGO_PKG_VERSION"));
+const MIN_WIDTH: u16 = 123;
+const MIN_HEIGHT: u16 = 12;
 
 impl<'a> App<'a> {
     pub fn new(
@@ -229,8 +233,12 @@ impl<'a> App<'a> {
             self.alloc.procs.reset();
             self.alloc.arena.reset();
             self.handle_events()?;
-            term.draw(|f| updates = self.draw(f))?;
-            self.update(&mut updates);
+            if Self::sufficient_size(MIN_WIDTH, MIN_HEIGHT, term) {
+                term.draw(|f| updates = self.draw(f))?;
+                self.update(&mut updates);
+            } else {
+                term.draw(|f| self.draw_insufficient_size(f))?;
+            }
             std::thread::sleep(Duration::from_millis(20));
         }
         if self.finish_state.is_none() {
@@ -240,6 +248,18 @@ impl<'a> App<'a> {
         }
         term.backend_mut().execute(DisableMouseCapture)?;
         Ok(())
+    }
+
+    fn draw_insufficient_size(&mut self, frame: &mut Frame) {
+        static MESSAGE: LazyLock<String> =
+            LazyLock::new(|| format!("Terminal of size {MIN_WIDTH}x{MIN_HEIGHT} is required"));
+        frame.render_widget((&*MESSAGE).to_text().centered(), frame.area());
+    }
+
+    fn sufficient_size(required_width: u16, required_height: u16, term: &DefaultTerminal) -> bool {
+        term.size()
+            .map(|Size { width, height }| width >= required_width && height >= required_height)
+            .unwrap_or(false)
     }
 
     fn kill_child(&mut self) -> std::io::Result<()> {
@@ -564,10 +584,7 @@ fn main() -> Result<(), std::io::Error> {
             for _ in 0..VERSION_HEADER.len() {
                 print!("=");
             }
-            println!(
-                "\n{}\n",
-                include_str!("../LICENSE"),
-            );
+            println!("\n{}\n", include_str!("../LICENSE"),);
             std::process::exit(0);
         }
         "--help" => {

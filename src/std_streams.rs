@@ -19,8 +19,8 @@ pub struct StdStreamsWidget {
 
 #[derive(Debug, Clone, Copy, Default)]
 pub enum ActiveStream {
-    #[default]
     Stderr,
+    #[default]
     Stdout,
 }
 
